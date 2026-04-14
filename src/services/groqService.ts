@@ -17,13 +17,12 @@ export async function generateKeywords(
             role: 'user',
             content: `You are a stock footage search expert.
 Given this narration sentence, generate exactly 4 
-short search keywords (1-3 words each) optimized 
-for finding stock footage on Pexels.
+search keywords, each MUST be exactly 2 words.
+Optimized for finding stock footage on Pexels.
 Use COMMON, GENERIC visual concepts.
-Avoid overly specific or abstract terms.
 Return ONLY a JSON array of strings, no explanation.
 Example: ["city street", "people walking", 
-          "market crowd", "urban landscape"]
+          "market crowd", "desert landscape"]
 
 Sentence: "${sentence}"`,
           },

@@ -46,3 +46,32 @@ body {
 .toolbar-button {
   @apply flex items-center gap-2 rounded-xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-panel)] px-3 py-2 text-sm text-[color:var(--text-primary)];
 }
+
+/* Custom scrollbar - minimal dark style */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* Hide scrollbar for assembly tray horizontal scroll */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

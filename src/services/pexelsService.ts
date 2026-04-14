@@ -13,7 +13,7 @@ export async function searchFootage(
   page: number = 1
 ): Promise<CandidateClip[]> {
   const response = await fetch(
-    `${PEXELS_BASE_URL}/search?query=${encodeURIComponent(keyword)}&per_page=15&page=${page}&orientation=landscape`,
+    `${PEXELS_BASE_URL}/search?query=${encodeURIComponent(keyword)}&per_page=6&page=${page}&orientation=landscape`,
     {
       headers: {
         Authorization: import.meta.env.VITE_PEXELS_API_KEY,
@@ -25,6 +25,7 @@ export async function searchFootage(
 
   return data.videos
     .filter((video: any) => video.duration <= 15)
+    .slice(0, 4)
     .map((video: any) => {
       const videoFile =
         video.video_files.find(

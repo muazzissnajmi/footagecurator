@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+
 import { Download, X } from 'lucide-react'
 
 import type { TrayClip } from '@/types'
@@ -18,10 +20,47 @@ function getTotalDuration(clips: TrayClip[]): string {
 }
 
 export function AssemblyTray() {
+  const [downloadProgress, setDownloadProgress] = useState(0)
+  const [downloadState, setDownloadState] = useState<'idle' | 'loading' | 'done'>(
+    'idle'
+  )
+
   const trayClips = useWorkstationStore(state => state.trayClips)
   const removeFromTray = useWorkstationStore(state => state.removeFromTray)
   const isDownloading = useWorkstationStore(state => state.isDownloading)
   const downloadAll = useWorkstationStore(state => state.downloadAll)
+
+  useEffect(() => {
+    if (downloadState !== 'done') {
+      return undefined
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDownloadState('idle')
+      setDownloadProgress(0)
+    }, 1800)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [downloadState])
+
+  async function handleDownloadAll() {
+    setDownloadState('loading')
+    setDownloadProgress(0)
+
+    await downloadAll(completed => {
+      setDownloadProgress(completed)
+    })
+
+    setDownloadProgress(trayClips.length)
+    setDownloadState('done')
+  }
+
+  const downloadLabel =
+    downloadState === 'loading'
+      ? `Downloading ${Math.min(downloadProgress, trayClips.length)}/${trayClips.length}...`
+      : downloadState === 'done'
+        ? 'Done! ✓'
+        : `Download All (${trayClips.length})`
 
   return (
     <section className="rounded-[30px] border border-[color:var(--border-subtle)] bg-[linear-gradient(180deg,#101415_0%,#0d1011_100%)] px-5 py-5 shadow-[0_28px_90px_rgba(0,0,0,0.26)] lg:px-6">
@@ -42,17 +81,17 @@ export function AssemblyTray() {
           </label>
           <button
             type="button"
-            onClick={() => void downloadAll()}
-            disabled={isDownloading}
+            onClick={() => void handleDownloadAll()}
+            disabled={isDownloading || trayClips.length === 0}
             className="inline-flex items-center gap-2 rounded-2xl bg-[radial-gradient(circle_at_top,#8cb0ff_0%,#6d92fb_30%,#5476e1_65%,#3c5ccd_100%)] px-5 py-3 text-sm font-medium text-white shadow-[0_14px_30px_rgba(59,130,246,0.34)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Download className="h-4 w-4" />
-            {isDownloading ? 'Downloading...' : `Download All (${trayClips.length})`}
+            {downloadLabel}
           </button>
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+      <div className="hide-scrollbar mt-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         {trayClips.map(clip => (
           <article
             key={clip.id}

@@ -30,7 +30,9 @@ interface WorkstationState {
   nextPage: () => void
   addToTray: (clip: CandidateClip) => void
   removeFromTray: (clipId: string) => void
-  downloadAll: () => void
+  downloadAll: (
+    onProgress?: (completed: number, total: number) => void
+  ) => Promise<void>
 }
 
 const accentColorMap = {
@@ -280,13 +282,13 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     })
   },
 
-  downloadAll: async () => {
+  downloadAll: async onProgress => {
     const { trayClips } = get()
 
     set({ isDownloading: true })
 
     try {
-      await downloadAllClips(trayClips)
+      await downloadAllClips(trayClips, onProgress)
     } finally {
       set({ isDownloading: false })
     }
