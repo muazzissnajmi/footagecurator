@@ -40,6 +40,16 @@ const accentColorMap = {
   emerald: 'bg-[#10b981]',
 } as const
 
+function syncCandidateClips(
+  clips: CandidateClip[],
+  trayClips: TrayClip[]
+): CandidateClip[] {
+  return clips.map(clip => ({
+    ...clip,
+    added: trayClips.some(item => item.id === clip.id),
+  }))
+}
+
 function findSentenceById(
   paragraphs: ParsedParagraph[],
   sentenceId: string
@@ -76,6 +86,9 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
       candidateClips: [],
       trayClips: [],
       currentPage: 1,
+      isGeneratingKeywords: false,
+      isLoadingCandidates: false,
+      isDownloading: false,
     })
   },
 
@@ -86,6 +99,7 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
       keywords: [],
       activeKeyword: null,
       candidateClips: [],
+      currentPage: 1,
     })
   },
 
@@ -106,6 +120,7 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     }
 
     set({
+      activeParagraphId: sentence.paragraphId,
       activeSentenceId: id,
       isGeneratingKeywords: true,
       keywords: [],
@@ -133,7 +148,10 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
         return
       }
 
-      const candidateClips = await searchFootage(activeKeyword, 1)
+      const candidateClips = syncCandidateClips(
+        await searchFootage(activeKeyword, 1),
+        get().trayClips
+      )
       set({
         candidateClips,
         currentPage: 1,
@@ -159,13 +177,19 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     })
 
     try {
-      let candidateClips = await searchFootage(keyword, 1)
+      let candidateClips = syncCandidateClips(
+        await searchFootage(keyword, 1),
+        get().trayClips
+      )
 
       if (candidateClips.length === 0) {
         const fallbackKeyword = keyword.split(' ')[0]
 
         if (fallbackKeyword) {
-          candidateClips = await searchFootage(fallbackKeyword, 1)
+          candidateClips = syncCandidateClips(
+            await searchFootage(fallbackKeyword, 1),
+            get().trayClips
+          )
         }
       }
 
@@ -195,7 +219,10 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     })
 
     try {
-      const candidateClips = await searchFootage(activeKeyword, next)
+      const candidateClips = syncCandidateClips(
+        await searchFootage(activeKeyword, next),
+        get().trayClips
+      )
       set({
         candidateClips,
         isLoadingCandidates: false,

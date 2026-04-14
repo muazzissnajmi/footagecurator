@@ -1,11 +1,6 @@
 import { ChevronDown, HelpCircle, Plus, Settings } from 'lucide-react'
 
-import type { ParsedParagraph } from '@/types'
-
-type ScriptNavigatorProps = {
-  paragraphs: ParsedParagraph[]
-  activeSentenceId: string | null
-}
+import { useWorkstationStore } from '@/store/useWorkstationStore'
 
 const accentBorderMap = {
   blue: 'border-[color:var(--accent-blue)]',
@@ -21,10 +16,14 @@ const accentDotMap = {
   emerald: 'bg-[color:var(--accent-emerald)]',
 } as const
 
-export function ScriptNavigator({
-  paragraphs,
-  activeSentenceId,
-}: ScriptNavigatorProps) {
+export function ScriptNavigator() {
+  const paragraphs = useWorkstationStore(state => state.paragraphs)
+  const activeParagraphId = useWorkstationStore(state => state.activeParagraphId)
+  const activeSentenceId = useWorkstationStore(state => state.activeSentenceId)
+  const trayClips = useWorkstationStore(state => state.trayClips)
+  const setActiveParagraph = useWorkstationStore(state => state.setActiveParagraph)
+  const setActiveSentence = useWorkstationStore(state => state.setActiveSentence)
+
   return (
     <aside className="flex h-full min-h-0 w-full flex-col px-4 py-5 lg:px-3 lg:py-6">
       <div className="mb-4 px-2">
@@ -38,12 +37,19 @@ export function ScriptNavigator({
 
       <div className="flex-1 space-y-3 overflow-y-auto pr-1">
         {paragraphs.map((paragraph, index) => (
-          <details
+          <div
             key={paragraph.id}
-            open={index === 0}
-            className="overflow-hidden rounded-[18px] border border-[color:var(--border-subtle)] bg-[linear-gradient(180deg,#101010_0%,#0d1313_100%)] shadow-[0_18px_50px_rgba(0,0,0,0.24)]"
+            className={`overflow-hidden rounded-[18px] border bg-[linear-gradient(180deg,#101010_0%,#0d1313_100%)] shadow-[0_18px_50px_rgba(0,0,0,0.24)] transition-colors ${
+              activeParagraphId === paragraph.id
+                ? 'border-[color:var(--accent-blue)]/40'
+                : 'border-[color:var(--border-subtle)]'
+            }`}
           >
-            <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3 py-3 marker:hidden">
+            <button
+              type="button"
+              onClick={() => setActiveParagraph(paragraph.id)}
+              className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
+            >
               <div className="min-w-0 flex-1">
                 <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-dim)]">
                   P{index + 1}
@@ -63,44 +69,59 @@ export function ScriptNavigator({
                     />
                   ))}
                 </div>
-                <ChevronDown className="h-3.5 w-3.5 text-[color:var(--text-muted)]" />
+                <ChevronDown
+                  className={`h-3.5 w-3.5 text-[color:var(--text-muted)] transition-transform ${
+                    activeParagraphId === paragraph.id ? 'rotate-180' : ''
+                  }`}
+                />
               </div>
-            </summary>
+            </button>
 
-            <div className="space-y-2 px-2 pb-2">
-              {paragraph.sentences.map(sentence => {
-                const isActive = sentence.id === activeSentenceId
+            {activeParagraphId === paragraph.id ? (
+              <div className="space-y-2 px-2 pb-2">
+                {paragraph.sentences.map(sentence => {
+                  const isActive = sentence.id === activeSentenceId
+                  const clipCount = trayClips.filter(
+                    clip => clip.sentenceId === sentence.id
+                  ).length
 
-                return (
-                  <div
-                    key={sentence.id}
-                    className={`rounded-[14px] border-l-2 px-3 py-2.5 transition-colors ${accentBorderMap[sentence.accent]} ${
-                      isActive
-                        ? 'bg-[linear-gradient(180deg,#141822_0%,#12161d_100%)] ring-1 ring-[color:var(--accent-blue)]/40'
-                        : 'bg-black/24'
-                    }`}
-                  >
-                    <div className="mb-1.5 flex items-center justify-between gap-3">
-                      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-dim)]">
-                        S{sentence.index + 1}
-                      </span>
-                      <div className="flex gap-1">
-                        {Array.from({ length: 4 }).map((_, dotIndex) => (
-                          <span
-                            key={dotIndex}
-                            className={`h-1 w-1 rounded-full ${accentDotMap[sentence.accent]} ${dotIndex === 0 || isActive ? 'opacity-100' : 'opacity-30'}`}
-                          />
-                        ))}
+                  return (
+                    <button
+                      key={sentence.id}
+                      type="button"
+                      onClick={() => void setActiveSentence(sentence.id)}
+                      className={`w-full rounded-[14px] border-l-2 px-3 py-2.5 text-left transition-colors ${accentBorderMap[sentence.accent]} ${
+                        isActive
+                          ? 'bg-[linear-gradient(180deg,#141822_0%,#12161d_100%)] shadow-[0_0_0_1px_rgba(59,130,246,0.34),0_0_24px_rgba(59,130,246,0.14)]'
+                          : 'bg-black/24'
+                      }`}
+                    >
+                      <div className="mb-1.5 flex items-center justify-between gap-3">
+                        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-dim)]">
+                          S{sentence.index + 1}
+                        </span>
+                        <div className="flex gap-1">
+                          {Array.from({ length: 4 }).map((_, dotIndex) => (
+                            <span
+                              key={dotIndex}
+                              className={`h-1.5 w-1.5 rounded-full ${accentDotMap[sentence.accent]} ${
+                                dotIndex < Math.min(clipCount, 4)
+                                  ? 'opacity-100'
+                                  : 'opacity-25'
+                              }`}
+                            />
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                    <p className="line-clamp-2 text-[12px] leading-4 text-[color:var(--text-muted)]">
-                      {sentence.text}
-                    </p>
-                  </div>
-                )
-              })}
-            </div>
-          </details>
+                      <p className="line-clamp-2 text-[12px] leading-4 text-[color:var(--text-muted)]">
+                        {sentence.text}
+                      </p>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
         ))}
       </div>
 

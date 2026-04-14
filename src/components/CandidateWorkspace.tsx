@@ -1,13 +1,7 @@
 import { RefreshCcw, Search, Sparkles } from 'lucide-react'
 
 import type { CandidateClip, ParsedSentence } from '@/types'
-
-type CandidateWorkspaceProps = {
-  activeSentence: ParsedSentence | null
-  keywords: string[]
-  activeKeyword: string | null
-  clips: CandidateClip[]
-}
+import { useWorkstationStore } from '@/store/useWorkstationStore'
 
 const accentDotMap = {
   blue: 'bg-[color:var(--accent-blue)]',
@@ -16,7 +10,13 @@ const accentDotMap = {
   emerald: 'bg-[color:var(--accent-emerald)]',
 } as const
 
-function CandidateCard({ clip }: { clip: CandidateClip }) {
+function CandidateCard({
+  clip,
+  onAdd,
+}: {
+  clip: CandidateClip
+  onAdd: (clip: CandidateClip) => void
+}) {
   return (
     <article className="group overflow-hidden rounded-[22px] border border-[color:var(--border-subtle)] bg-[linear-gradient(180deg,#111717_0%,#121917_100%)] shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
       <div className={`relative h-36 bg-gradient-to-br ${clip.palette}`}>
@@ -43,10 +43,12 @@ function CandidateCard({ clip }: { clip: CandidateClip }) {
         </div>
         <button
           type="button"
+          onClick={() => onAdd(clip)}
+          disabled={clip.added}
           className={`w-full rounded-xl border px-3 py-2 text-sm ${
             clip.added
               ? 'border-[color:var(--accent-blue)]/30 bg-[color:var(--accent-blue)]/14 text-[color:var(--accent-blue)]'
-              : 'border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-primary)]'
+              : 'border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)]'
           }`}
         >
           {clip.added ? 'Added to assembly' : 'Add to assembly'}
@@ -56,12 +58,30 @@ function CandidateCard({ clip }: { clip: CandidateClip }) {
   )
 }
 
-export function CandidateWorkspace({
-  activeSentence,
-  keywords,
-  activeKeyword,
-  clips,
-}: CandidateWorkspaceProps) {
+export function CandidateWorkspace() {
+  const paragraphs = useWorkstationStore(state => state.paragraphs)
+  const activeSentenceId = useWorkstationStore(state => state.activeSentenceId)
+  const keywords = useWorkstationStore(state => state.keywords)
+  const activeKeyword = useWorkstationStore(state => state.activeKeyword)
+  const candidateClips = useWorkstationStore(state => state.candidateClips)
+  const isGeneratingKeywords = useWorkstationStore(
+    state => state.isGeneratingKeywords
+  )
+  const isLoadingCandidates = useWorkstationStore(
+    state => state.isLoadingCandidates
+  )
+  const setActiveKeyword = useWorkstationStore(state => state.setActiveKeyword)
+  const nextPage = useWorkstationStore(state => state.nextPage)
+  const addToTray = useWorkstationStore(state => state.addToTray)
+
+  const activeSentence: ParsedSentence | null =
+    paragraphs
+      .flatMap(paragraph => paragraph.sentences)
+      .find(sentence => sentence.id === activeSentenceId) ?? null
+
+  const shimmerKeywords = Array.from({ length: 4 })
+  const skeletonCards = Array.from({ length: 4 })
+
   return (
     <section className="flex min-h-0 flex-1 flex-col">
       <div className="rounded-[30px] border border-[color:var(--border-subtle)] bg-[linear-gradient(180deg,#111516_0%,#101414_100%)] px-5 py-5 shadow-[0_28px_90px_rgba(0,0,0,0.28)] lg:px-6 lg:py-6">
@@ -91,23 +111,31 @@ export function CandidateWorkspace({
         </div>
 
         <div className="mb-4 flex flex-wrap gap-2.5">
-          {keywords.map(keyword => {
-            const isActive = keyword === activeKeyword
+          {isGeneratingKeywords
+            ? shimmerKeywords.map((_, index) => (
+                <div
+                  key={index}
+                  className="h-9 w-32 animate-pulse rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)]"
+                />
+              ))
+            : keywords.map(keyword => {
+                const isActive = keyword === activeKeyword
 
-            return (
-              <button
-                key={keyword}
-                type="button"
-                className={`rounded-full border px-4 py-2 text-[12px] leading-none ${
-                  isActive
-                    ? 'border-[color:var(--accent-blue)]/30 bg-[radial-gradient(circle_at_top,#8cb0ff_0%,#698ef5_35%,#4f68cf_70%,#3449a1_100%)] text-white shadow-[0_0_22px_rgba(59,130,246,0.32)]'
-                    : 'border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-muted)]'
-                }`}
-              >
-                {keyword}
-              </button>
-            )
-          })}
+                return (
+                  <button
+                    key={keyword}
+                    type="button"
+                    onClick={() => void setActiveKeyword(keyword)}
+                    className={`rounded-full border px-4 py-2 text-[12px] leading-none ${
+                      isActive
+                        ? 'border-[color:var(--accent-blue)]/30 bg-[radial-gradient(circle_at_top,#8cb0ff_0%,#698ef5_35%,#4f68cf_70%,#3449a1_100%)] text-white shadow-[0_0_22px_rgba(59,130,246,0.32)]'
+                        : 'border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-muted)]'
+                    }`}
+                  >
+                    {keyword}
+                  </button>
+                )
+              })}
         </div>
 
         <div className="mb-5 flex items-center gap-3">
@@ -128,10 +156,26 @@ export function CandidateWorkspace({
             Cari
           </button>
         </div>
-        {clips.length > 0 ? (
+
+        {isLoadingCandidates ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {clips.map(clip => (
-              <CandidateCard key={clip.id} clip={clip} />
+            {skeletonCards.map((_, index) => (
+              <div
+                key={index}
+                className="overflow-hidden rounded-[22px] border border-[color:var(--border-subtle)] bg-[linear-gradient(180deg,#111717_0%,#121917_100%)]"
+              >
+                <div className="h-36 animate-pulse bg-[color:var(--surface-muted)]" />
+                <div className="space-y-3 p-3">
+                  <div className="h-5 animate-pulse rounded bg-[color:var(--surface-muted)]" />
+                  <div className="h-10 animate-pulse rounded-xl bg-[color:var(--surface-muted)]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : candidateClips.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {candidateClips.map(clip => (
+              <CandidateCard key={clip.id} clip={clip} onAdd={addToTray} />
             ))}
           </div>
         ) : (
@@ -141,7 +185,7 @@ export function CandidateWorkspace({
                 <Sparkles className="h-5 w-5 text-[color:var(--text-muted)]" />
               </div>
               <p className="mt-5 text-base text-[color:var(--text-primary)]">
-                Click a sentence to begin
+                Click a sentence to find footage
               </p>
               <p className="mt-2 text-sm text-[color:var(--text-muted)]">
                 Keyword suggestions and stock footage matches will appear here.
@@ -151,7 +195,12 @@ export function CandidateWorkspace({
         )}
 
         <div className="mt-4 flex justify-end">
-          <button type="button" className="flex items-center gap-2 rounded-2xl border border-[color:var(--border-subtle)] bg-transparent px-4 py-2.5 text-sm text-[color:var(--text-muted)]">
+          <button
+            type="button"
+            onClick={() => void nextPage()}
+            disabled={!activeKeyword || isLoadingCandidates || isGeneratingKeywords}
+            className="flex items-center gap-2 rounded-2xl border border-[color:var(--border-subtle)] bg-transparent px-4 py-2.5 text-sm text-[color:var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
             <RefreshCcw className="h-4 w-4" />
             Next 4
           </button>

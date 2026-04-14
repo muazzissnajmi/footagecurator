@@ -1,17 +1,4 @@
 import { AssemblyTray, CandidateWorkspace, ScriptNavigator } from '@/components'
-import {
-  workstationActiveKeyword,
-  workstationActiveSentenceId,
-  workstationCandidateClips,
-  workstationKeywords,
-  workstationParagraphs,
-  workstationTrayClips,
-} from '@/data/workstation'
-
-const activeSentence =
-  workstationParagraphs
-    .flatMap(paragraph => paragraph.sentences)
-    .find(sentence => sentence.id === workstationActiveSentenceId) ?? null
 
 export function WorkstationPage() {
   return (
@@ -22,18 +9,10 @@ export function WorkstationPage() {
       </div>
 
       <div className="relative mx-auto grid min-h-[calc(100vh-73px)] max-w-[1520px] grid-cols-1 gap-5 px-3 py-4 lg:grid-cols-[186px_minmax(0,1fr)] lg:px-4 lg:py-5">
-        <ScriptNavigator
-          paragraphs={workstationParagraphs}
-          activeSentenceId={workstationActiveSentenceId}
-        />
+        <ScriptNavigator />
         <div className="space-y-5 pb-6">
-          <CandidateWorkspace
-            activeSentence={activeSentence}
-            keywords={workstationKeywords}
-            activeKeyword={workstationActiveKeyword}
-            clips={workstationCandidateClips}
-          />
-          <AssemblyTray clips={workstationTrayClips} />
+          <CandidateWorkspace />
+          <AssemblyTray />
         </div>
       </div>
     </div>

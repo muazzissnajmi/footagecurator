@@ -1,12 +1,15 @@
 import { useState } from 'react'
 
-import { EditorPage } from '@/pages/EditorPage'
+import { TranscriptInput } from '@/components'
 import { WorkstationPage } from '@/pages/WorkstationPage'
+import { EditorPage } from '@/pages/EditorPage'
+import { useWorkstationStore } from '@/store/useWorkstationStore'
 
 type Tab = 'workstation' | 'editor'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('workstation')
+  const paragraphsLength = useWorkstationStore(state => state.paragraphs.length)
 
   return (
     <div className="min-h-screen bg-[color:var(--surface-canvas)]">
@@ -32,6 +35,7 @@ export default function App() {
         </div>
       </nav>
       {activeTab === 'workstation' ? <WorkstationPage /> : <EditorPage />}
+      {paragraphsLength === 0 ? <TranscriptInput /> : null}
     </div>
   )
 }
