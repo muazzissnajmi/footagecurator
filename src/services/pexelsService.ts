@@ -27,14 +27,18 @@ export async function searchFootage(
     .filter((video: any) => video.duration <= 15)
     .map((video: any) => {
       const videoFile =
-        video.video_files.find((f: any) => f.quality === 'hd') ??
+        video.video_files.find(
+          (f: any) => f.quality === 'hd' && f.width <= 1920
+        ) ??
+        video.video_files.find((f: any) => f.quality === 'sd') ??
         video.video_files[0]
+
       return {
         id: String(video.id),
         title: keyword + ' #' + String(video.id).slice(-3),
         source: 'Pexels' as const,
         duration: formatDuration(video.duration),
-        resolution: video.width >= 3840 ? '4K' : 'HD',
+        resolution: 'HD' as const,
         added: false,
         thumbnail: video.image,
         videoUrl: videoFile?.link ?? '',

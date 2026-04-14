@@ -54,7 +54,7 @@ export function ScriptNavigator() {
                 <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-dim)]">
                   P{index + 1}
                 </p>
-                <p className="mt-2 line-clamp-2 text-[13px] font-medium leading-4 text-[color:var(--text-primary)]">
+                <p className="mt-2 line-clamp-2 text-base font-medium leading-5 text-[color:var(--text-primary)]">
                   {paragraph.sentences[0]?.text ?? paragraph.label}
                 </p>
               </div>
@@ -90,7 +90,7 @@ export function ScriptNavigator() {
                       key={sentence.id}
                       type="button"
                       onClick={() => void setActiveSentence(sentence.id)}
-                      className={`w-full rounded-[14px] border-l-2 px-3 py-2.5 text-left transition-colors ${accentBorderMap[sentence.accent]} ${
+                      className={`w-full rounded-[14px] border-l-2 p-3 text-left transition-colors ${accentBorderMap[sentence.accent]} ${
                         isActive
                           ? 'bg-[linear-gradient(180deg,#141822_0%,#12161d_100%)] shadow-[0_0_0_1px_rgba(59,130,246,0.34),0_0_24px_rgba(59,130,246,0.14)]'
                           : 'bg-black/24'
@@ -113,7 +113,7 @@ export function ScriptNavigator() {
                           ))}
                         </div>
                       </div>
-                      <p className="line-clamp-2 text-[12px] leading-4 text-[color:var(--text-muted)]">
+                      <p className="line-clamp-2 text-sm leading-5 text-[color:var(--text-muted)]">
                         {sentence.text}
                       </p>
                     </button>

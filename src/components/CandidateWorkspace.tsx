@@ -1,4 +1,6 @@
+import clsx from 'clsx'
 import { RefreshCcw, Search, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { CandidateClip, ParsedSentence } from '@/types'
 import { useWorkstationStore } from '@/store/useWorkstationStore'
@@ -10,29 +12,64 @@ const accentDotMap = {
   emerald: 'bg-[color:var(--accent-emerald)]',
 } as const
 
-function CandidateCard({
+function ClipCard({
   clip,
   onAdd,
 }: {
   clip: CandidateClip
   onAdd: (clip: CandidateClip) => void
 }) {
+  const [isHovered, setIsHovered] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (videoRef.current) {
+      if (isHovered) {
+        void videoRef.current.play()
+      } else {
+        videoRef.current.pause()
+        videoRef.current.currentTime = 0
+      }
+    }
+  }, [isHovered])
+
   return (
     <article className="group overflow-hidden rounded-[22px] border border-[color:var(--border-subtle)] bg-[linear-gradient(180deg,#111717_0%,#121917_100%)] shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
-      <div className={`relative h-36 bg-gradient-to-br ${clip.palette}`}>
-        <img
-          src={clip.thumbnail}
-          alt={clip.title}
-          className="h-full w-full object-cover opacity-92 transition duration-500 group-hover:scale-[1.03]"
-        />
-        <span className="font-mono absolute right-2 top-2 rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
-          {clip.duration}
-        </span>
-        <div className="absolute inset-x-0 bottom-0 flex items-end justify-between bg-gradient-to-t from-black/80 via-black/25 to-transparent px-3 py-2">
-          <span className="rounded-md border border-white/10 bg-black/55 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-white">
-            {clip.source}
+      <div
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        <div className={`relative h-44 overflow-hidden bg-gradient-to-br ${clip.palette}`}>
+          <img
+            src={clip.thumbnail}
+            alt={clip.title}
+            className={clsx(
+              'absolute inset-0 h-full w-full object-cover',
+              'transition-opacity duration-300',
+              isHovered ? 'opacity-0' : 'opacity-100'
+            )}
+          />
+          {clip.videoUrl ? (
+            <video
+              ref={videoRef}
+              src={clip.videoUrl}
+              className={clsx(
+                'absolute inset-0 h-full w-full object-cover',
+                'transition-opacity duration-300',
+                isHovered ? 'opacity-100' : 'opacity-0'
+              )}
+              muted
+              loop
+              playsInline
+              preload="none"
+            />
+          ) : null}
+          <span className="font-mono absolute right-2 top-2 rounded-md bg-black/70 px-2 py-0.5 text-[11px] text-white">
+            {clip.duration}
           </span>
-          <span className="font-mono text-[10px] uppercase text-white/72">{clip.resolution}</span>
+          <span className="absolute left-2 bottom-2 rounded-md bg-black/70 px-2 py-0.5 text-[10px] uppercase tracking-wider text-white">
+            {clip.resolution}
+          </span>
         </div>
       </div>
       <div className="space-y-3 p-3">
@@ -73,6 +110,11 @@ export function CandidateWorkspace() {
   const setActiveKeyword = useWorkstationStore(state => state.setActiveKeyword)
   const nextPage = useWorkstationStore(state => state.nextPage)
   const addToTray = useWorkstationStore(state => state.addToTray)
+  const [searchInput, setSearchInput] = useState(activeKeyword ?? '')
+
+  useEffect(() => {
+    setSearchInput(activeKeyword ?? '')
+  }, [activeKeyword])
 
   const activeSentence: ParsedSentence | null =
     paragraphs
@@ -81,6 +123,16 @@ export function CandidateWorkspace() {
 
   const shimmerKeywords = Array.from({ length: 4 })
   const skeletonCards = Array.from({ length: 4 })
+
+  const handleSearch = () => {
+    const keyword = searchInput.trim()
+
+    if (!keyword) {
+      return
+    }
+
+    void setActiveKeyword(keyword)
+  }
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">
@@ -142,18 +194,24 @@ export function CandidateWorkspace() {
           <label className="flex flex-1 items-center gap-3 rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-canvas)]/55 px-4 py-3 text-[color:var(--text-muted)]">
             <Search className="h-4 w-4" />
             <input
-              readOnly
-              value={activeKeyword ?? ''}
+              value={searchInput}
+              onChange={event => setSearchInput(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  handleSearch()
+                }
+              }}
               className="w-full bg-transparent text-sm outline-none placeholder:text-[color:var(--text-dim)]"
               placeholder="Search footage keywords"
             />
           </label>
           <button
             type="button"
-            className="flex items-center gap-2 rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-panel)] px-4 py-3 text-sm text-[color:var(--text-muted)]"
+            onClick={handleSearch}
+            className="flex items-center justify-center rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-panel)] px-4 py-3 text-sm text-[color:var(--text-muted)]"
           >
             <Search className="h-4 w-4" />
-            Cari
           </button>
         </div>
 
@@ -175,7 +233,7 @@ export function CandidateWorkspace() {
         ) : candidateClips.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {candidateClips.map(clip => (
-              <CandidateCard key={clip.id} clip={clip} onAdd={addToTray} />
+              <ClipCard key={clip.id} clip={clip} onAdd={addToTray} />
             ))}
           </div>
         ) : (
