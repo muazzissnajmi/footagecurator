@@ -68,19 +68,24 @@ interface TimelineClip extends Clip {
 ## Folder Structure (NEVER restructure)
 src/
 ├── components/
-│   ├── Navbar/
+│   ├── TranscriptInput/
 │   ├── Sidebar/
-│   ├── SectionPanel/
-│   ├── SentenceStrip/
 │   ├── CandidateGrid/
-│   └── Timeline/
+│   ├── AssemblyTray/
+│   └── Editor/
 ├── store/
-│   └── useStore.ts
+│   └── useWorkstationStore.ts
+├── services/
+│   ├── groqService.ts
+│   ├── pexelsService.ts
+│   └── downloadService.ts
+├── utils/
+│   └── parseTranscript.ts
+├── data/
+│   ├── workstation.ts
+│   └── sampleTranscript.ts
 ├── types/
 │   └── index.ts
-├── hooks/
-├── data/
-│   └── mock.ts
 └── App.tsx
 
 ## Layout Zones
