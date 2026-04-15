@@ -1,4 +1,9 @@
 import type { TrayClip } from '@/types'
+import { trimBlobToMp4 } from './trimService'
+
+function hasTrim(clip: TrayClip): boolean {
+  return clip.trimStart != null || clip.trimEnd != null
+}
 
 function buildClipFilename(clip: TrayClip, index: number) {
   const paddedIndex = String(index + 1).padStart(2, '0')
@@ -108,7 +113,20 @@ export async function downloadAllClips(
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i]
-    const blob = await blobPromises[i]
+    let blob = await blobPromises[i]
+
+    if (blob && hasTrim(clip)) {
+      const full = durationToSeconds(clip.duration)
+      const startSec = clip.trimStart ?? 0
+      const endSec = clip.trimEnd ?? full
+      try {
+        blob = await trimBlobToMp4(blob, startSec, endSec)
+      } catch (err) {
+        // Trimming failed — fall back to the full clip so the user still
+        // gets something. The EDL still carries the correct in/out points.
+        console.error(`Trim failed for clip ${clip.id}:`, err)
+      }
+    }
 
     if (blob) {
       triggerBlobDownload(blob, `${buildClipFilename(clip, i)}.mp4`)

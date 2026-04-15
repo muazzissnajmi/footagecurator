@@ -63,7 +63,7 @@ export async function searchFootage(
   const hasMore = data.videos.length >= perPage
 
   const clips = data.videos
-    .filter(video => video.duration <= 15)
+    .filter(video => video.duration <= 30)
     .slice(0, 4)
     .map(video => {
       const files = video.video_files ?? []

@@ -10,4 +10,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // ffmpeg.wasm ships a worker (`?worker_file&type=module`) that trips up
+  // Vite's dep prebundler. Exclude it so Vite serves the package as-is.
+  optimizeDeps: {
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
+  },
 })
