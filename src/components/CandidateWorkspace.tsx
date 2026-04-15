@@ -4,13 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { CandidateClip, ParsedSentence } from '@/types'
 import { useWorkstationStore } from '@/store/useWorkstationStore'
-
-const accentDotMap = {
-  blue: 'bg-[color:var(--accent-blue)]',
-  violet: 'bg-[color:var(--accent-violet)]',
-  amber: 'bg-[color:var(--accent-amber)]',
-  emerald: 'bg-[color:var(--accent-emerald)]',
-} as const
+import { accentDotMap } from '@/utils/accentColors'
 
 function ClipCard({
   clip,
@@ -109,6 +103,7 @@ export function CandidateWorkspace() {
   )
   const setActiveKeyword = useWorkstationStore(state => state.setActiveKeyword)
   const nextPage = useWorkstationStore(state => state.nextPage)
+  const hasMorePages = useWorkstationStore(state => state.hasMorePages)
   const addToTray = useWorkstationStore(state => state.addToTray)
   const [searchInput, setSearchInput] = useState(activeKeyword ?? '')
 
@@ -177,6 +172,7 @@ export function CandidateWorkspace() {
                   <button
                     key={keyword}
                     type="button"
+                    aria-pressed={isActive}
                     onClick={() => void setActiveKeyword(keyword)}
                     className={`rounded-full border px-4 py-2 text-[12px] leading-none ${
                       isActive
@@ -256,7 +252,7 @@ export function CandidateWorkspace() {
           <button
             type="button"
             onClick={() => void nextPage()}
-            disabled={!activeKeyword || isLoadingCandidates || isGeneratingKeywords}
+            disabled={!activeKeyword || isLoadingCandidates || isGeneratingKeywords || !hasMorePages}
             className="flex items-center gap-2 rounded-2xl border border-[color:var(--border-subtle)] bg-transparent px-4 py-2.5 text-sm text-[color:var(--text-muted)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCcw className="h-4 w-4" />

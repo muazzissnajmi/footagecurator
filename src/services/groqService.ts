@@ -16,12 +16,12 @@ export async function generateKeywords(
           {
             role: 'user',
             content: `You are a stock footage search expert.
-Given this narration sentence, generate exactly 4 
+Given this narration sentence, generate exactly 4
 search keywords, each MUST be exactly 2 words.
 Optimized for finding stock footage on Pexels.
 Use COMMON, GENERIC visual concepts.
 Return ONLY a JSON array of strings, no explanation.
-Example: ["city street", "people walking", 
+Example: ["city street", "people walking",
           "market crowd", "desert landscape"]
 
 Sentence: "${sentence}"`,
@@ -30,13 +30,24 @@ Sentence: "${sentence}"`,
       }),
     }
   )
+
+  if (!response.ok) {
+    throw new Error(
+      `Groq request failed: ${response.status} ${response.statusText}`
+    )
+  }
+
   const data = await response.json()
-  console.log('Groq response:', data)
+  const text = data?.choices?.[0]?.message?.content
+
+  if (typeof text !== 'string') {
+    throw new Error('Groq returned unexpected response shape')
+  }
+
   try {
-    const text = data.choices[0].message.content
-    return JSON.parse(text)
+    const parsed = JSON.parse(text)
+    return Array.isArray(parsed) ? parsed.filter(k => typeof k === 'string') : []
   } catch {
-    console.error('Failed to parse keywords:', data)
     return []
   }
 }

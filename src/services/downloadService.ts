@@ -11,12 +11,17 @@ function buildClipFilename(clip: TrayClip, index: number) {
   return `${paddedIndex}_${keyword}`
 }
 
-export async function downloadClip(
-  videoUrl: string,
-  filename: string
-): Promise<void> {
+async function fetchBlob(videoUrl: string): Promise<Blob> {
   const response = await fetch(videoUrl)
-  const blob = await response.blob()
+  if (!response.ok) {
+    throw new Error(
+      `Download failed: ${response.status} ${response.statusText}`
+    )
+  }
+  return response.blob()
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -27,23 +32,36 @@ export async function downloadClip(
   URL.revokeObjectURL(url)
 }
 
+export async function downloadClip(
+  videoUrl: string,
+  filename: string
+): Promise<void> {
+  const blob = await fetchBlob(videoUrl)
+  triggerBlobDownload(blob, filename)
+}
+
 export async function downloadAllClips(
   clips: TrayClip[],
   onProgress?: (completed: number, total: number) => void
 ): Promise<void> {
+  // Fetch all blobs in parallel; trigger anchor clicks sequentially
+  // (some browsers throttle/cancel rapid simultaneous downloads).
+  const blobPromises = clips.map(clip =>
+    clip.videoUrl ? fetchBlob(clip.videoUrl).catch(() => null) : Promise.resolve(null)
+  )
+
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i]
+    const blob = await blobPromises[i]
 
-    if (!clip.videoUrl) {
-      onProgress?.(i + 1, clips.length)
-      continue
+    if (blob) {
+      triggerBlobDownload(blob, buildClipFilename(clip, i))
+      // Spacing prevents browser from coalescing/dropping downloads.
+      if (i < clips.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
     }
-
-    const filename = buildClipFilename(clip, i)
-
-    await downloadClip(clip.videoUrl, filename)
     onProgress?.(i + 1, clips.length)
-    await new Promise(resolve => setTimeout(resolve, 600))
   }
 
   const manifest = clips

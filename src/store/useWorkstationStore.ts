@@ -9,6 +9,7 @@ import type {
   ParsedSentence,
   TrayClip,
 } from '@/types'
+import { accentBgMap } from '@/utils/accentColors'
 import { parseTranscript } from '@/utils/parseTranscript'
 
 interface WorkstationState {
@@ -21,6 +22,7 @@ interface WorkstationState {
   candidateClips: CandidateClip[]
   isLoadingCandidates: boolean
   currentPage: number
+  hasMorePages: boolean
   trayClips: TrayClip[]
   isDownloading: boolean
   loadTranscript: (text: string) => void
@@ -35,13 +37,6 @@ interface WorkstationState {
   ) => Promise<void>
 }
 
-const accentColorMap = {
-  blue: 'bg-[#3b82f6]',
-  violet: 'bg-[#8b5cf6]',
-  amber: 'bg-[#f59e0b]',
-  emerald: 'bg-[#10b981]',
-} as const
-
 function syncCandidateClips(
   clips: CandidateClip[],
   trayClips: TrayClip[]
@@ -51,6 +46,10 @@ function syncCandidateClips(
     added: trayClips.some(item => item.id === clip.id),
   }))
 }
+
+let sentenceRequestId = 0
+let keywordRequestId = 0
+let pageRequestId = 0
 
 function findSentenceById(
   paragraphs: ParsedParagraph[],
@@ -74,6 +73,7 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
   candidateClips: [],
   isLoadingCandidates: false,
   currentPage: 1,
+  hasMorePages: false,
   trayClips: [],
   isDownloading: false,
 
@@ -106,6 +106,8 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
   },
 
   setActiveSentence: async id => {
+    const requestId = ++sentenceRequestId
+    const isStale = () => requestId !== sentenceRequestId
     const sentence = findSentenceById(get().paragraphs, id)
 
     if (!sentence) {
@@ -132,6 +134,7 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
 
     try {
       const keywords = await generateKeywords(sentence.text)
+      if (isStale()) return
       const activeKeyword = keywords[0] ?? null
 
       set({
@@ -150,16 +153,16 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
         return
       }
 
-      const candidateClips = syncCandidateClips(
-        await searchFootage(activeKeyword, 1),
-        get().trayClips
-      )
+      const result = await searchFootage(activeKeyword, 1)
+      if (isStale()) return
       set({
-        candidateClips,
+        candidateClips: syncCandidateClips(result.clips, get().trayClips),
         currentPage: 1,
+        hasMorePages: result.hasMore,
         isLoadingCandidates: false,
       })
     } catch {
+      if (isStale()) return
       set({
         keywords: [],
         activeKeyword: null,
@@ -172,6 +175,9 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
   },
 
   setActiveKeyword: async keyword => {
+    const requestId = ++keywordRequestId
+    const isStale = () => requestId !== keywordRequestId
+
     set({
       activeKeyword: keyword,
       currentPage: 1,
@@ -179,27 +185,25 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     })
 
     try {
-      let candidateClips = syncCandidateClips(
-        await searchFootage(keyword, 1),
-        get().trayClips
-      )
+      let result = await searchFootage(keyword, 1)
+      if (isStale()) return
 
-      if (candidateClips.length === 0) {
+      if (result.clips.length === 0) {
         const fallbackKeyword = keyword.split(' ')[0]
 
         if (fallbackKeyword) {
-          candidateClips = syncCandidateClips(
-            await searchFootage(fallbackKeyword, 1),
-            get().trayClips
-          )
+          result = await searchFootage(fallbackKeyword, 1)
+          if (isStale()) return
         }
       }
 
       set({
-        candidateClips,
+        candidateClips: syncCandidateClips(result.clips, get().trayClips),
+        hasMorePages: result.hasMore,
         isLoadingCandidates: false,
       })
     } catch {
+      if (isStale()) return
       set({
         candidateClips: [],
         isLoadingCandidates: false,
@@ -208,12 +212,14 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
   },
 
   nextPage: async () => {
-    const { activeKeyword, currentPage } = get()
+    const { activeKeyword, currentPage, hasMorePages } = get()
 
-    if (!activeKeyword) {
+    if (!activeKeyword || !hasMorePages) {
       return
     }
 
+    const requestId = ++pageRequestId
+    const isStale = () => requestId !== pageRequestId
     const next = currentPage + 1
     set({
       currentPage: next,
@@ -221,15 +227,15 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     })
 
     try {
-      const candidateClips = syncCandidateClips(
-        await searchFootage(activeKeyword, next),
-        get().trayClips
-      )
+      const result = await searchFootage(activeKeyword, next)
+      if (isStale()) return
       set({
-        candidateClips,
+        candidateClips: syncCandidateClips(result.clips, get().trayClips),
+        hasMorePages: result.hasMore,
         isLoadingCandidates: false,
       })
     } catch {
+      if (isStale()) return
       set({
         isLoadingCandidates: false,
       })
@@ -248,7 +254,7 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
       return
     }
 
-    const sentenceAccent = accentColorMap[sentence.accent]
+    const sentenceAccent = accentBgMap[sentence.accent]
 
     set({
       trayClips: [

@@ -1,20 +1,7 @@
 import { ChevronDown, HelpCircle, Plus, Settings } from 'lucide-react'
 
 import { useWorkstationStore } from '@/store/useWorkstationStore'
-
-const accentBorderMap = {
-  blue: 'border-[color:var(--accent-blue)]',
-  violet: 'border-[color:var(--accent-violet)]',
-  amber: 'border-[color:var(--accent-amber)]',
-  emerald: 'border-[color:var(--accent-emerald)]',
-} as const
-
-const accentDotMap = {
-  blue: 'bg-[color:var(--accent-blue)]',
-  violet: 'bg-[color:var(--accent-violet)]',
-  amber: 'bg-[color:var(--accent-amber)]',
-  emerald: 'bg-[color:var(--accent-emerald)]',
-} as const
+import { accentBorderMap, accentDotMap } from '@/utils/accentColors'
 
 export function ScriptNavigator() {
   const paragraphs = useWorkstationStore(state => state.paragraphs)
@@ -47,6 +34,7 @@ export function ScriptNavigator() {
           >
             <button
               type="button"
+              aria-expanded={activeParagraphId === paragraph.id}
               onClick={() => setActiveParagraph(paragraph.id)}
               className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left"
             >
@@ -89,6 +77,7 @@ export function ScriptNavigator() {
                     <button
                       key={sentence.id}
                       type="button"
+                      aria-current={isActive ? 'true' : undefined}
                       onClick={() => void setActiveSentence(sentence.id)}
                       className={`w-full rounded-[14px] border-l-2 p-3 text-left transition-colors ${accentBorderMap[sentence.accent]} ${
                         isActive
