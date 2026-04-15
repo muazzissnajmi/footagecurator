@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { RefreshCcw, Search, Sparkles } from 'lucide-react'
+import { Plus, RefreshCcw, Search, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type { CandidateClip, ParsedSentence } from '@/types'
@@ -102,10 +102,13 @@ export function CandidateWorkspace() {
     state => state.isLoadingCandidates
   )
   const setActiveKeyword = useWorkstationStore(state => state.setActiveKeyword)
+  const addCustomKeyword = useWorkstationStore(state => state.addCustomKeyword)
   const nextPage = useWorkstationStore(state => state.nextPage)
   const hasMorePages = useWorkstationStore(state => state.hasMorePages)
   const addToTray = useWorkstationStore(state => state.addToTray)
   const [searchInput, setSearchInput] = useState(activeKeyword ?? '')
+  const [customKeywordInput, setCustomKeywordInput] = useState('')
+  const [isAddingKeyword, setIsAddingKeyword] = useState(false)
 
   useEffect(() => {
     setSearchInput(activeKeyword ?? '')
@@ -127,6 +130,17 @@ export function CandidateWorkspace() {
     }
 
     void setActiveKeyword(keyword)
+  }
+
+  const handleAddCustomKeyword = () => {
+    const value = customKeywordInput.trim()
+    if (!value) {
+      setIsAddingKeyword(false)
+      return
+    }
+    addCustomKeyword(value)
+    setCustomKeywordInput('')
+    setIsAddingKeyword(false)
   }
 
   return (
@@ -184,6 +198,38 @@ export function CandidateWorkspace() {
                   </button>
                 )
               })}
+
+          {!isGeneratingKeywords && activeSentence ? (
+            isAddingKeyword ? (
+              <input
+                autoFocus
+                value={customKeywordInput}
+                onChange={event => setCustomKeywordInput(event.target.value)}
+                onBlur={handleAddCustomKeyword}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    handleAddCustomKeyword()
+                  } else if (event.key === 'Escape') {
+                    setCustomKeywordInput('')
+                    setIsAddingKeyword(false)
+                  }
+                }}
+                placeholder="custom keyword"
+                className="min-w-[120px] rounded-full border border-dashed border-[color:var(--border-subtle)] bg-transparent px-4 py-2 text-[12px] leading-none text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-dim)]"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAddingKeyword(true)}
+                aria-label="Add custom keyword"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-[color:var(--border-subtle)] px-3 py-2 text-[12px] leading-none text-[color:var(--text-muted)] hover:border-[color:var(--border-strong)]"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+              </button>
+            )
+          ) : null}
         </div>
 
         <div className="mb-5 flex items-center gap-3">
