@@ -1,6 +1,12 @@
 export async function generateKeywords(
-  sentence: string
+  sentence: string,
+  excluded: string[] = []
 ): Promise<string[]> {
+  const exclusionLine =
+    excluded.length > 0
+      ? `\nDo NOT suggest any of: ${excluded.map(k => `"${k}"`).join(', ')}.`
+      : ''
+
   const response = await fetch(
     'https://api.groq.com/openai/v1/chat/completions',
     {
@@ -19,7 +25,7 @@ export async function generateKeywords(
 Given this narration sentence, generate exactly 4
 search keywords, each MUST be exactly 2 words.
 Optimized for finding stock footage on Pexels.
-Use COMMON, GENERIC visual concepts.
+Use COMMON, GENERIC visual concepts.${exclusionLine}
 Return ONLY a JSON array of strings, no explanation.
 Example: ["city street", "people walking",
           "market crowd", "desert landscape"]

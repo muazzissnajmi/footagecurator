@@ -11,14 +11,17 @@ export function countClipsForSentence(
 
 export function isSentenceComplete(
   trayClips: TrayClip[],
-  sentenceId: string
+  sentenceId: string,
+  skippedSentences: Record<string, true> = {}
 ): boolean {
+  if (skippedSentences[sentenceId]) return true
   return countClipsForSentence(trayClips, sentenceId) >= MAX_CLIPS_PER_SENTENCE
 }
 
 export function getParagraphProgress(
   paragraph: ParsedParagraph,
-  trayClips: TrayClip[]
+  trayClips: TrayClip[],
+  skippedSentences: Record<string, true> = {}
 ): {
   completedSentences: number
   totalSentences: number
@@ -29,12 +32,19 @@ export function getParagraphProgress(
   const totalSentences = paragraph.sentences.length
   let completedSentences = 0
   let clips = 0
+  let activeSentences = 0
   for (const sentence of paragraph.sentences) {
+    const skipped = Boolean(skippedSentences[sentence.id])
     const n = countClipsForSentence(trayClips, sentence.id)
     clips += n
-    if (n >= MAX_CLIPS_PER_SENTENCE) completedSentences++
+    if (skipped) {
+      completedSentences++
+    } else {
+      activeSentences++
+      if (n >= MAX_CLIPS_PER_SENTENCE) completedSentences++
+    }
   }
-  const clipTarget = totalSentences * MAX_CLIPS_PER_SENTENCE
+  const clipTarget = activeSentences * MAX_CLIPS_PER_SENTENCE
   return {
     completedSentences,
     totalSentences,
@@ -46,7 +56,8 @@ export function getParagraphProgress(
 
 export function getAssemblyProgress(
   paragraphs: ParsedParagraph[],
-  trayClips: TrayClip[]
+  trayClips: TrayClip[],
+  skippedSentences: Record<string, true> = {}
 ): {
   completedSentences: number
   totalSentences: number
@@ -55,11 +66,21 @@ export function getAssemblyProgress(
 } {
   let completedSentences = 0
   let totalSentences = 0
+  let activeSentences = 0
   for (const paragraph of paragraphs) {
     for (const sentence of paragraph.sentences) {
       totalSentences++
-      if (countClipsForSentence(trayClips, sentence.id) >= MAX_CLIPS_PER_SENTENCE) {
+      const skipped = Boolean(skippedSentences[sentence.id])
+      if (skipped) {
         completedSentences++
+      } else {
+        activeSentences++
+        if (
+          countClipsForSentence(trayClips, sentence.id) >=
+          MAX_CLIPS_PER_SENTENCE
+        ) {
+          completedSentences++
+        }
       }
     }
   }
@@ -67,6 +88,6 @@ export function getAssemblyProgress(
     completedSentences,
     totalSentences,
     clips: trayClips.length,
-    clipTarget: totalSentences * MAX_CLIPS_PER_SENTENCE,
+    clipTarget: activeSentences * MAX_CLIPS_PER_SENTENCE,
   }
 }

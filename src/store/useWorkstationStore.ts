@@ -27,6 +27,7 @@ interface KeywordCacheEntry {
 interface SentenceCacheEntry {
   keywords: string[]
   keywordResults: Record<string, KeywordCacheEntry>
+  dismissedKeywords?: string[]
 }
 
 interface WorkstationState {
@@ -44,20 +45,35 @@ interface WorkstationState {
   isDownloading: boolean
   sentenceCache: Record<string, SentenceCacheEntry>
   lastRemovedClip: TrayClip | null
+  skippedSentences: Record<string, true>
+  keywordError: string | null
+  searchError: string | null
   loadTranscript: (text: string) => void
   setActiveParagraph: (id: string) => void
   setActiveSentence: (id: string) => void
   setActiveKeyword: (keyword: string) => void
   addCustomKeyword: (keyword: string) => void
+  dismissKeyword: (keyword: string) => void
+  regenerateKeywords: () => Promise<void>
+  retryLoadCandidates: () => Promise<void>
   nextPage: () => void
   addToTray: (clip: CandidateClip) => void
+  addClipToSentence: (clip: CandidateClip, sentenceId: string) => void
   removeFromTray: (clipId: string) => void
   undoRemoveFromTray: () => void
   dismissLastRemoved: () => void
   reorderTray: (fromId: string, toId: string) => void
+  setClipTrim: (
+    clipId: string,
+    trimStart: number | undefined,
+    trimEnd: number | undefined
+  ) => void
+  toggleSkipSentence: (id: string) => void
   downloadAll: (
     onProgress?: (completed: number, total: number) => void
   ) => Promise<void>
+  exportProject: () => string
+  importProject: (payload: unknown) => boolean
   resetProject: () => void
 }
 
@@ -91,6 +107,10 @@ function reindexTray(clips: TrayClip[]): TrayClip[] {
   return clips.map((clip, index) => ({ ...clip, order: index }))
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Something went wrong'
+}
+
 export const useWorkstationStore = create<WorkstationState>()(
   persist(
     (set, get) => ({
@@ -108,6 +128,9 @@ export const useWorkstationStore = create<WorkstationState>()(
       isDownloading: false,
       sentenceCache: {},
       lastRemovedClip: null,
+      skippedSentences: {},
+      keywordError: null,
+      searchError: null,
 
       loadTranscript: text => {
         const parsed = parseTranscript(text)
@@ -126,6 +149,9 @@ export const useWorkstationStore = create<WorkstationState>()(
           isDownloading: false,
           sentenceCache: {},
           lastRemovedClip: null,
+          skippedSentences: {},
+          keywordError: null,
+          searchError: null,
         })
       },
 
@@ -145,6 +171,9 @@ export const useWorkstationStore = create<WorkstationState>()(
           isDownloading: false,
           sentenceCache: {},
           lastRemovedClip: null,
+          skippedSentences: {},
+          keywordError: null,
+          searchError: null,
         })
       },
 
@@ -157,6 +186,8 @@ export const useWorkstationStore = create<WorkstationState>()(
           candidateClips: [],
           currentPage: 1,
           hasMorePages: false,
+          keywordError: null,
+          searchError: null,
         })
       },
 
@@ -197,6 +228,8 @@ export const useWorkstationStore = create<WorkstationState>()(
             hasMorePages: cachedResult?.hasMore ?? false,
             isGeneratingKeywords: false,
             isLoadingCandidates: false,
+            keywordError: null,
+            searchError: null,
           })
           return
         }
@@ -210,6 +243,8 @@ export const useWorkstationStore = create<WorkstationState>()(
           candidateClips: [],
           currentPage: 1,
           hasMorePages: false,
+          keywordError: null,
+          searchError: null,
         })
 
         try {
@@ -260,16 +295,21 @@ export const useWorkstationStore = create<WorkstationState>()(
               },
             },
           })
-        } catch {
+        } catch (err) {
           if (isStale()) return
+          const message = errorMessage(err)
+          // Distinguish keyword-generation vs search errors by current state.
+          const wasGenerating = get().isGeneratingKeywords
           set({
-            keywords: [],
-            activeKeyword: null,
+            keywords: wasGenerating ? [] : get().keywords,
+            activeKeyword: wasGenerating ? null : get().activeKeyword,
             candidateClips: [],
             currentPage: 1,
             hasMorePages: false,
             isGeneratingKeywords: false,
             isLoadingCandidates: false,
+            keywordError: wasGenerating ? message : null,
+            searchError: wasGenerating ? null : message,
           })
         }
       },
@@ -289,6 +329,7 @@ export const useWorkstationStore = create<WorkstationState>()(
               currentPage: cached.pagesFetched,
               hasMorePages: cached.hasMore,
               isLoadingCandidates: false,
+              searchError: null,
             })
             return
           }
@@ -299,6 +340,7 @@ export const useWorkstationStore = create<WorkstationState>()(
           currentPage: 1,
           hasMorePages: false,
           isLoadingCandidates: true,
+          searchError: null,
         })
 
         try {
@@ -339,13 +381,18 @@ export const useWorkstationStore = create<WorkstationState>()(
                       pagesFetched: 1,
                     },
                   },
+                  dismissedKeywords: prev.dismissedKeywords,
                 },
               },
             })
           }
-        } catch {
+        } catch (err) {
           if (isStale()) return
-          set({ candidateClips: [], isLoadingCandidates: false })
+          set({
+            candidateClips: [],
+            isLoadingCandidates: false,
+            searchError: errorMessage(err),
+          })
         }
       },
 
@@ -371,11 +418,107 @@ export const useWorkstationStore = create<WorkstationState>()(
               [activeSentenceId]: {
                 keywords: nextKeywords,
                 keywordResults: prev.keywordResults,
+                dismissedKeywords: prev.dismissedKeywords,
               },
             },
           })
         }
         void get().setActiveKeyword(trimmed)
+      },
+
+      dismissKeyword: keyword => {
+        const { keywords, activeKeyword, activeSentenceId, sentenceCache } =
+          get()
+        const nextKeywords = keywords.filter(k => k !== keyword)
+        const nextActive =
+          activeKeyword === keyword ? (nextKeywords[0] ?? null) : activeKeyword
+
+        set({ keywords: nextKeywords })
+
+        if (activeSentenceId) {
+          const prev = sentenceCache[activeSentenceId] ?? {
+            keywords: nextKeywords,
+            keywordResults: {},
+          }
+          const dismissed = new Set(prev.dismissedKeywords ?? [])
+          dismissed.add(keyword)
+          set({
+            sentenceCache: {
+              ...sentenceCache,
+              [activeSentenceId]: {
+                keywords: nextKeywords,
+                keywordResults: prev.keywordResults,
+                dismissedKeywords: Array.from(dismissed),
+              },
+            },
+          })
+        }
+
+        if (nextActive && nextActive !== activeKeyword) {
+          void get().setActiveKeyword(nextActive)
+        } else if (!nextActive) {
+          set({ activeKeyword: null, candidateClips: [] })
+        }
+      },
+
+      regenerateKeywords: async () => {
+        const { activeSentenceId, paragraphs, sentenceCache } = get()
+        if (!activeSentenceId) return
+        const sentence = findSentenceById(paragraphs, activeSentenceId)
+        if (!sentence) return
+
+        const existingCache = sentenceCache[activeSentenceId]
+        const excluded = [
+          ...(existingCache?.keywords ?? []),
+          ...(existingCache?.dismissedKeywords ?? []),
+        ]
+
+        const requestId = ++sentenceRequestId
+        const isStale = () => requestId !== sentenceRequestId
+
+        set({ isGeneratingKeywords: true, keywordError: null })
+        try {
+          const newKeywords = await generateKeywords(sentence.text, excluded)
+          if (isStale()) return
+          const merged = [
+            ...(existingCache?.keywords ?? []),
+            ...newKeywords.filter(k => !excluded.includes(k)),
+          ]
+          set({
+            keywords: merged,
+            isGeneratingKeywords: false,
+            sentenceCache: {
+              ...get().sentenceCache,
+              [activeSentenceId]: {
+                keywords: merged,
+                keywordResults: existingCache?.keywordResults ?? {},
+                dismissedKeywords: existingCache?.dismissedKeywords,
+              },
+            },
+          })
+        } catch (err) {
+          if (isStale()) return
+          set({
+            isGeneratingKeywords: false,
+            keywordError: errorMessage(err),
+          })
+        }
+      },
+
+      retryLoadCandidates: async () => {
+        const { activeKeyword } = get()
+        if (activeKeyword) {
+          await get().setActiveKeyword(activeKeyword)
+        } else {
+          const { activeSentenceId } = get()
+          if (activeSentenceId) {
+            // Force re-run by clearing cache entry for this sentence.
+            const cache = { ...get().sentenceCache }
+            delete cache[activeSentenceId]
+            set({ sentenceCache: cache })
+            await get().setActiveSentence(activeSentenceId)
+          }
+        }
       },
 
       nextPage: async () => {
@@ -415,32 +558,40 @@ export const useWorkstationStore = create<WorkstationState>()(
                       pagesFetched: next,
                     },
                   },
+                  dismissedKeywords: prev.dismissedKeywords,
                 },
               },
             })
           }
-        } catch {
+        } catch (err) {
           if (isStale()) return
-          set({ isLoadingCandidates: false })
+          set({ isLoadingCandidates: false, searchError: errorMessage(err) })
         }
       },
 
       addToTray: clip => {
-        const { trayClips, activeSentenceId, paragraphs, candidateClips } = get()
+        const { activeSentenceId } = get()
+        if (!activeSentenceId) return
+        get().addClipToSentence(clip, activeSentenceId)
+      },
 
-        if (!activeSentenceId || trayClips.some(item => item.id === clip.id)) {
-          return
-        }
+      addClipToSentence: (clip, sentenceId) => {
+        const {
+          trayClips,
+          paragraphs,
+          candidateClips,
+          skippedSentences,
+        } = get()
 
-        // Enforce 5-clip-per-sentence cap
+        if (trayClips.some(item => item.id === clip.id)) return
+        if (skippedSentences[sentenceId]) return
+
         const perSentenceCount = trayClips.filter(
-          c => c.sentenceId === activeSentenceId
+          c => c.sentenceId === sentenceId
         ).length
-        if (perSentenceCount >= MAX_CLIPS_PER_SENTENCE) {
-          return
-        }
+        if (perSentenceCount >= MAX_CLIPS_PER_SENTENCE) return
 
-        const sentence = findSentenceById(paragraphs, activeSentenceId)
+        const sentence = findSentenceById(paragraphs, sentenceId)
         if (!sentence) return
 
         set({
@@ -448,7 +599,7 @@ export const useWorkstationStore = create<WorkstationState>()(
             ...trayClips,
             {
               ...clip,
-              sentenceId: activeSentenceId,
+              sentenceId,
               sentenceAccent: accentBgMap[sentence.accent],
               order: trayClips.length,
             },
@@ -509,6 +660,40 @@ export const useWorkstationStore = create<WorkstationState>()(
         set({ trayClips: reindexTray(next) })
       },
 
+      setClipTrim: (clipId, trimStart, trimEnd) => {
+        const { trayClips } = get()
+        set({
+          trayClips: trayClips.map(clip =>
+            clip.id === clipId ? { ...clip, trimStart, trimEnd } : clip
+          ),
+        })
+      },
+
+      toggleSkipSentence: id => {
+        const { skippedSentences, trayClips, candidateClips } = get()
+        const isSkipped = Boolean(skippedSentences[id])
+        const nextSkipped = { ...skippedSentences }
+        if (isSkipped) {
+          delete nextSkipped[id]
+          set({ skippedSentences: nextSkipped })
+        } else {
+          nextSkipped[id] = true
+          // When skipping, drop any clips already picked for this sentence.
+          const removedIds = new Set(
+            trayClips.filter(c => c.sentenceId === id).map(c => c.id)
+          )
+          set({
+            skippedSentences: nextSkipped,
+            trayClips: reindexTray(
+              trayClips.filter(c => !removedIds.has(c.id))
+            ),
+            candidateClips: candidateClips.map(item =>
+              removedIds.has(item.id) ? { ...item, added: false } : item
+            ),
+          })
+        }
+      },
+
       downloadAll: async onProgress => {
         const { trayClips } = get()
         set({ isDownloading: true })
@@ -517,6 +702,87 @@ export const useWorkstationStore = create<WorkstationState>()(
         } finally {
           set({ isDownloading: false })
         }
+      },
+
+      exportProject: () => {
+        const state = get()
+        return JSON.stringify(
+          {
+            __kind: 'footage-curator/session',
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            paragraphs: state.paragraphs,
+            activeParagraphId: state.activeParagraphId,
+            activeSentenceId: state.activeSentenceId,
+            trayClips: state.trayClips,
+            sentenceCache: state.sentenceCache,
+            skippedSentences: state.skippedSentences,
+          },
+          null,
+          2
+        )
+      },
+
+      importProject: payload => {
+        if (!payload || typeof payload !== 'object') return false
+        const data = payload as Record<string, unknown>
+        if (data.__kind !== 'footage-curator/session') return false
+        if (!Array.isArray(data.paragraphs)) return false
+        set({
+          paragraphs: data.paragraphs as ParsedParagraph[],
+          activeParagraphId:
+            typeof data.activeParagraphId === 'string'
+              ? data.activeParagraphId
+              : null,
+          activeSentenceId:
+            typeof data.activeSentenceId === 'string'
+              ? data.activeSentenceId
+              : null,
+          trayClips: Array.isArray(data.trayClips)
+            ? (data.trayClips as TrayClip[])
+            : [],
+          sentenceCache:
+            data.sentenceCache && typeof data.sentenceCache === 'object'
+              ? (data.sentenceCache as Record<string, SentenceCacheEntry>)
+              : {},
+          skippedSentences:
+            data.skippedSentences && typeof data.skippedSentences === 'object'
+              ? (data.skippedSentences as Record<string, true>)
+              : {},
+          keywords: [],
+          activeKeyword: null,
+          candidateClips: [],
+          currentPage: 1,
+          hasMorePages: false,
+          isGeneratingKeywords: false,
+          isLoadingCandidates: false,
+          isDownloading: false,
+          lastRemovedClip: null,
+          keywordError: null,
+          searchError: null,
+        })
+        // Re-hydrate candidate UI for active sentence from cache.
+        const activeId =
+          typeof data.activeSentenceId === 'string'
+            ? data.activeSentenceId
+            : null
+        if (activeId) {
+          const cached = get().sentenceCache[activeId]
+          if (cached && cached.keywords.length > 0) {
+            const kw = cached.keywords[0]
+            const res = cached.keywordResults[kw]
+            set({
+              keywords: cached.keywords,
+              activeKeyword: kw,
+              candidateClips: res
+                ? syncCandidateClips(res.clips, get().trayClips)
+                : [],
+              currentPage: res?.pagesFetched ?? 1,
+              hasMorePages: res?.hasMore ?? false,
+            })
+          }
+        }
+        return true
       },
     }),
     {
@@ -527,6 +793,7 @@ export const useWorkstationStore = create<WorkstationState>()(
         activeSentenceId: state.activeSentenceId,
         trayClips: state.trayClips,
         sentenceCache: state.sentenceCache,
+        skippedSentences: state.skippedSentences,
       }),
       onRehydrateStorage: () => state => {
         // Rehydrate UI state from cache for the active sentence so the user

@@ -1,12 +1,15 @@
 import clsx from 'clsx'
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Loader2,
   Plus,
   RefreshCcw,
   Search,
+  SkipForward,
   Sparkles,
+  X,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -30,11 +33,15 @@ function ClipCard({
   index,
   onAdd,
   sentenceFull,
+  sentenceSkipped,
+  slotKey,
 }: {
   clip: CandidateClip
   index: number
   onAdd: (clip: CandidateClip) => void
   sentenceFull: boolean
+  sentenceSkipped: boolean
+  slotKey: number | null
 }) {
   const [isHovered, setIsHovered] = useState(false)
   const [showVideo, setShowVideo] = useState(false)
@@ -62,24 +69,35 @@ function ClipCard({
   }, [isHovered, clip.videoUrl])
 
   const handleAdd = () => {
-    if (clip.added || sentenceFull) return
+    if (clip.added || sentenceFull || sentenceSkipped) return
     onAdd(clip)
     setJustAdded(true)
     window.setTimeout(() => setJustAdded(false), 620)
   }
 
-  const disabled = clip.added || sentenceFull
+  const disabled = clip.added || sentenceFull || sentenceSkipped
   const buttonLabel = clip.added
     ? '✓ Added to assembly'
-    : sentenceFull
-      ? 'Sentence full (5/5)'
-      : 'Add to assembly'
+    : sentenceSkipped
+      ? 'Sentence skipped'
+      : sentenceFull
+        ? 'Sentence full (5/5)'
+        : 'Add to assembly'
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault()
       handleAdd()
     }
+  }
+
+  const handleDragStart = (event: React.DragEvent) => {
+    if (disabled) {
+      event.preventDefault()
+      return
+    }
+    event.dataTransfer.setData('application/x-footage-clip', JSON.stringify(clip))
+    event.dataTransfer.effectAllowed = 'copy'
   }
 
   return (
@@ -94,6 +112,8 @@ function ClipCard({
       onMouseLeave={() => setIsHovered(false)}
       onFocus={() => setIsHovered(true)}
       onBlur={() => setIsHovered(false)}
+      draggable={!disabled}
+      onDragStart={handleDragStart}
       style={{ animationDelay: `${Math.min(index * 40, 200)}ms` }}
       className={clsx(
         'clip-fade-in group overflow-hidden rounded-[var(--radius-card)] border bg-[linear-gradient(180deg,#141a1c_0%,#121819_100%)] transition-colors',
@@ -126,7 +146,6 @@ function ClipCard({
             preload="none"
           />
         ) : null}
-        {/* Play hint */}
         {!showVideo && clip.videoUrl ? (
           <div
             className={clsx(
@@ -138,6 +157,11 @@ function ClipCard({
               <Loader2 className="h-4 w-4 animate-spin" />
             </span>
           </div>
+        ) : null}
+        {slotKey != null ? (
+          <span className="font-mono absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-md bg-black/75 text-[11px] text-white">
+            {slotKey}
+          </span>
         ) : null}
         <span className="font-mono absolute right-2 top-2 rounded-md bg-black/70 px-2 py-0.5 text-[11px] text-white">
           {clip.duration}
@@ -161,7 +185,7 @@ function ClipCard({
             'w-full rounded-[var(--radius-control)] border px-3 py-2 text-sm transition-colors',
             clip.added
               ? 'border-[color:var(--accent-blue)]/35 bg-[color:var(--accent-blue)]/15 text-[color:var(--accent-blue)]'
-              : sentenceFull
+              : sentenceFull || sentenceSkipped
                 ? 'cursor-not-allowed border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-dim)]'
                 : 'border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)]'
           )}
@@ -186,9 +210,22 @@ export function CandidateWorkspace() {
     state => state.isLoadingCandidates
   )
   const trayClips = useWorkstationStore(state => state.trayClips)
+  const skippedSentences = useWorkstationStore(state => state.skippedSentences)
+  const keywordError = useWorkstationStore(state => state.keywordError)
+  const searchError = useWorkstationStore(state => state.searchError)
   const setActiveSentence = useWorkstationStore(state => state.setActiveSentence)
   const setActiveKeyword = useWorkstationStore(state => state.setActiveKeyword)
   const addCustomKeyword = useWorkstationStore(state => state.addCustomKeyword)
+  const dismissKeyword = useWorkstationStore(state => state.dismissKeyword)
+  const regenerateKeywords = useWorkstationStore(
+    state => state.regenerateKeywords
+  )
+  const retryLoadCandidates = useWorkstationStore(
+    state => state.retryLoadCandidates
+  )
+  const toggleSkipSentence = useWorkstationStore(
+    state => state.toggleSkipSentence
+  )
   const nextPage = useWorkstationStore(state => state.nextPage)
   const hasMorePages = useWorkstationStore(state => state.hasMorePages)
   const addToTray = useWorkstationStore(state => state.addToTray)
@@ -207,6 +244,8 @@ export function CandidateWorkspace() {
   const prevId = getAdjacentSentenceId(paragraphs, activeSentenceId, -1)
   const nextId = getAdjacentSentenceId(paragraphs, activeSentenceId, 1)
 
+  const activeSentenceSkipped =
+    activeSentenceId ? Boolean(skippedSentences[activeSentenceId]) : false
   const activeSentenceClipCount = activeSentenceId
     ? countClipsForSentence(trayClips, activeSentenceId)
     : 0
@@ -255,7 +294,8 @@ export function CandidateWorkspace() {
         <div
           className={clsx(
             'mb-4 rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] px-4 py-4 transition-colors',
-            isSentenceLoading && 'border-[color:var(--accent-blue)]/30'
+            isSentenceLoading && 'border-[color:var(--accent-blue)]/30',
+            activeSentenceSkipped && 'opacity-80'
           )}
         >
           {activeSentence ? (
@@ -270,7 +310,7 @@ export function CandidateWorkspace() {
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <div className="min-w-0 flex-1">
-                <div className="mb-1.5 flex items-center gap-2">
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
                   <span
                     className={`h-2 w-2 rounded-full ${accentDotMap[activeSentence.accent]}`}
                   />
@@ -280,15 +320,33 @@ export function CandidateWorkspace() {
                   <span
                     className={clsx(
                       'font-mono rounded-full px-2 py-0.5 text-[10px]',
-                      activeSentenceFull
-                        ? 'bg-[color:var(--accent-emerald)]/15 text-[color:var(--accent-emerald)]'
-                        : 'bg-[color:var(--surface-raised)] text-[color:var(--text-muted)]'
+                      activeSentenceSkipped
+                        ? 'bg-[color:var(--accent-amber)]/15 text-[color:var(--accent-amber)]'
+                        : activeSentenceFull
+                          ? 'bg-[color:var(--accent-emerald)]/15 text-[color:var(--accent-emerald)]'
+                          : 'bg-[color:var(--surface-raised)] text-[color:var(--text-muted)]'
                     )}
                   >
-                    {activeSentenceFull
-                      ? `✓ ${activeSentenceClipCount}/${MAX_CLIPS_PER_SENTENCE}`
-                      : `${activeSentenceClipCount}/${MAX_CLIPS_PER_SENTENCE}`}
+                    {activeSentenceSkipped
+                      ? 'Skipped'
+                      : activeSentenceFull
+                        ? `✓ ${activeSentenceClipCount}/${MAX_CLIPS_PER_SENTENCE}`
+                        : `${activeSentenceClipCount}/${MAX_CLIPS_PER_SENTENCE}`}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleSkipSentence(activeSentence.id)}
+                    className={clsx(
+                      'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]',
+                      activeSentenceSkipped
+                        ? 'border-[color:var(--accent-amber)]/30 bg-[color:var(--accent-amber)]/15 text-[color:var(--accent-amber)]'
+                        : 'border-[color:var(--border-subtle)] text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]'
+                    )}
+                    title={activeSentenceSkipped ? 'Unskip (S)' : 'Skip — no footage needed (S)'}
+                  >
+                    <SkipForward className="h-3 w-3" />
+                    {activeSentenceSkipped ? 'Unskip' : 'Skip'}
+                  </button>
                   {isSentenceLoading ? (
                     <span className="inline-flex items-center gap-1 text-[11px] text-[color:var(--accent-blue)]">
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -296,18 +354,27 @@ export function CandidateWorkspace() {
                     </span>
                   ) : null}
                 </div>
-                <p className="text-[15px] leading-7 text-[color:var(--text-primary)]">
+                <p
+                  className={clsx(
+                    'text-[15px] leading-7 text-[color:var(--text-primary)]',
+                    activeSentenceSkipped && 'line-through text-[color:var(--text-muted)]'
+                  )}
+                >
                   {activeSentence.text}
                 </p>
                 <div className="mt-2 h-1 overflow-hidden rounded-full bg-[color:var(--surface-raised)]">
                   <div
                     className={clsx(
                       'h-full transition-[width] duration-300',
-                      activeSentenceFull
-                        ? 'bg-[color:var(--accent-emerald)]'
-                        : 'bg-[color:var(--accent-blue)]'
+                      activeSentenceSkipped
+                        ? 'bg-[color:var(--accent-amber)]/60'
+                        : activeSentenceFull
+                          ? 'bg-[color:var(--accent-emerald)]'
+                          : 'bg-[color:var(--accent-blue)]'
                     )}
-                    style={{ width: `${activeProgressPercent}%` }}
+                    style={{
+                      width: `${activeSentenceSkipped ? 100 : activeProgressPercent}%`,
+                    }}
                   />
                 </div>
               </div>
@@ -329,7 +396,7 @@ export function CandidateWorkspace() {
         </div>
 
         {/* Keyword chips */}
-        <div className="mb-4 flex flex-wrap gap-2.5">
+        <div className="mb-4 flex flex-wrap items-center gap-2.5">
           {isGeneratingKeywords ? (
             Array.from({ length: 4 }).map((_, index) => (
               <div
@@ -337,7 +404,7 @@ export function CandidateWorkspace() {
                 className="h-9 w-32 animate-pulse rounded-[var(--radius-chip)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)]"
               />
             ))
-          ) : keywords.length === 0 && activeSentence ? (
+          ) : keywords.length === 0 && activeSentence && !keywordError ? (
             <div className="flex items-center gap-3 rounded-[var(--radius-control)] border border-dashed border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)]/50 px-4 py-2.5 text-[12px] text-[color:var(--text-muted)]">
               <Sparkles className="h-3.5 w-3.5 text-[color:var(--accent-amber)]" />
               No keyword suggestions — try adding your own →
@@ -346,56 +413,105 @@ export function CandidateWorkspace() {
             keywords.map(keyword => {
               const isActive = keyword === activeKeyword
               return (
-                <button
+                <span
                   key={keyword}
-                  type="button"
-                  aria-pressed={isActive}
-                  onClick={() => void setActiveKeyword(keyword)}
                   className={clsx(
-                    'rounded-[var(--radius-chip)] border px-4 py-2 text-[12px] leading-none transition-colors',
+                    'group/chip inline-flex items-center gap-1 rounded-[var(--radius-chip)] border transition-colors',
                     isActive
                       ? 'border-[color:var(--accent-blue)]/30 bg-[radial-gradient(circle_at_top,#8cb0ff_0%,#698ef5_35%,#4f68cf_70%,#3449a1_100%)] text-white'
-                      : 'border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-muted)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]'
+                      : 'border-[color:var(--border-subtle)] text-[color:var(--text-muted)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]'
                   )}
                 >
-                  {keyword}
-                </button>
+                  <button
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() => void setActiveKeyword(keyword)}
+                    className="px-4 py-2 text-[12px] leading-none"
+                  >
+                    {keyword}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => dismissKeyword(keyword)}
+                    aria-label={`Dismiss keyword ${keyword}`}
+                    className={clsx(
+                      'mr-1 flex h-5 w-5 items-center justify-center rounded-full transition-opacity',
+                      isActive
+                        ? 'text-white/80 hover:bg-white/15 hover:text-white'
+                        : 'text-[color:var(--text-dim)] opacity-60 hover:opacity-100'
+                    )}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
               )
             })
           )}
 
           {!isGeneratingKeywords && activeSentence ? (
-            isAddingKeyword ? (
-              <input
-                autoFocus
-                value={customKeywordInput}
-                onChange={event => setCustomKeywordInput(event.target.value)}
-                onBlur={handleAddCustomKeyword}
-                onKeyDown={event => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    handleAddCustomKeyword()
-                  } else if (event.key === 'Escape') {
-                    setCustomKeywordInput('')
-                    setIsAddingKeyword(false)
-                  }
-                }}
-                placeholder="custom keyword"
-                className="min-w-[120px] rounded-[var(--radius-chip)] border border-dashed border-[color:var(--border-subtle)] bg-transparent px-4 py-2 text-[12px] leading-none text-[color:var(--text-primary)] placeholder:text-[color:var(--text-dim)]"
-              />
-            ) : (
+            <>
               <button
                 type="button"
-                onClick={() => setIsAddingKeyword(true)}
-                aria-label="Add custom keyword"
+                onClick={() => void regenerateKeywords()}
+                aria-label="Regenerate keywords"
                 className="inline-flex items-center gap-1 rounded-[var(--radius-chip)] border border-dashed border-[color:var(--border-subtle)] px-3 py-2 text-[12px] leading-none text-[color:var(--text-muted)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]"
+                title="Ask for more keyword suggestions (R)"
               >
-                <Plus className="h-3 w-3" />
-                Add
+                <Sparkles className="h-3 w-3" />
+                Regenerate
               </button>
-            )
+              {isAddingKeyword ? (
+                <input
+                  autoFocus
+                  value={customKeywordInput}
+                  onChange={event => setCustomKeywordInput(event.target.value)}
+                  onBlur={handleAddCustomKeyword}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      handleAddCustomKeyword()
+                    } else if (event.key === 'Escape') {
+                      setCustomKeywordInput('')
+                      setIsAddingKeyword(false)
+                    }
+                  }}
+                  placeholder="custom keyword"
+                  className="min-w-[120px] rounded-[var(--radius-chip)] border border-dashed border-[color:var(--border-subtle)] bg-transparent px-4 py-2 text-[12px] leading-none text-[color:var(--text-primary)] placeholder:text-[color:var(--text-dim)]"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsAddingKeyword(true)}
+                  aria-label="Add custom keyword"
+                  className="inline-flex items-center gap-1 rounded-[var(--radius-chip)] border border-dashed border-[color:var(--border-subtle)] px-3 py-2 text-[12px] leading-none text-[color:var(--text-muted)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]"
+                >
+                  <Plus className="h-3 w-3" />
+                  Add
+                </button>
+              )}
+            </>
           ) : null}
         </div>
+
+        {keywordError ? (
+          <div className="mb-4 flex items-start gap-3 rounded-[var(--radius-control)] border border-[color:var(--accent-amber)]/30 bg-[color:var(--accent-amber)]/10 px-4 py-3 text-[13px] text-[color:var(--text-primary)]">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--accent-amber)]" />
+            <div className="flex-1">
+              <p>Couldn't fetch keyword suggestions.</p>
+              <p className="mt-0.5 text-[11px] text-[color:var(--text-muted)]">
+                {keywordError}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void regenerateKeywords()}
+              className="inline-flex items-center gap-1 rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] px-3 py-1.5 text-[12px] text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
+            >
+              <RefreshCcw className="h-3 w-3" />
+              Retry
+            </button>
+          </div>
+        ) : null}
 
         {/* Search bar */}
         <div className="mb-5 flex items-center gap-3">
@@ -440,6 +556,26 @@ export function CandidateWorkspace() {
               </div>
             ))}
           </div>
+        ) : searchError ? (
+          <div className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-[var(--radius-card)] border border-dashed border-[color:var(--accent-amber)]/30 bg-[color:var(--accent-amber)]/5 px-8 text-center">
+            <AlertTriangle className="h-6 w-6 text-[color:var(--accent-amber)]" />
+            <div>
+              <p className="text-base text-[color:var(--text-primary)]">
+                Footage search failed
+              </p>
+              <p className="mt-1 text-sm text-[color:var(--text-muted)]">
+                {searchError}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void retryLoadCandidates()}
+              className="inline-flex items-center gap-2 rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] px-4 py-2 text-sm text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
+            >
+              <RefreshCcw className="h-3.5 w-3.5" />
+              Retry
+            </button>
+          </div>
         ) : candidateClips.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {candidateClips.map((clip, index) => (
@@ -449,6 +585,8 @@ export function CandidateWorkspace() {
                 index={index}
                 onAdd={addToTray}
                 sentenceFull={activeSentenceFull}
+                sentenceSkipped={activeSentenceSkipped}
+                slotKey={index < 5 ? index + 1 : null}
               />
             ))}
           </div>
@@ -459,13 +597,37 @@ export function CandidateWorkspace() {
                 <Sparkles className="h-5 w-5 text-[color:var(--text-muted)]" />
               </div>
               <p className="mt-4 text-base text-[color:var(--text-primary)]">
-                {activeSentence ? 'No matches yet' : 'Click a sentence to find footage'}
+                {activeSentence
+                  ? activeKeyword
+                    ? `No matches for "${activeKeyword}"`
+                    : 'No matches yet'
+                  : 'Click a sentence to find footage'}
               </p>
               <p className="mt-1.5 text-sm text-[color:var(--text-muted)]">
                 {activeSentence
-                  ? 'Try a different keyword or add your own'
+                  ? 'Try a different keyword, add your own, or regenerate suggestions.'
                   : 'Keyword suggestions and stock footage matches will appear here.'}
               </p>
+              {activeSentence ? (
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void regenerateKeywords()}
+                    className="inline-flex items-center gap-1.5 rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] px-3 py-1.5 text-[12px] text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    Regenerate keywords
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingKeyword(true)}
+                    className="inline-flex items-center gap-1.5 rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] px-3 py-1.5 text-[12px] text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add keyword
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         )}

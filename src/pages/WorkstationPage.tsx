@@ -1,6 +1,10 @@
 import { AssemblyTray, CandidateWorkspace, ScriptNavigator } from '@/components'
 
-export function WorkstationPage() {
+interface WorkstationPageProps {
+  onOpenPlayer: () => void
+}
+
+export function WorkstationPage({ onOpenPlayer }: WorkstationPageProps) {
   return (
     <div className="relative h-[calc(100vh-57px)] overflow-hidden bg-[color:var(--surface-canvas)]">
       {/* Subtle ambient wash, reduced from prior double-shadow gradient */}
@@ -15,7 +19,7 @@ export function WorkstationPage() {
         </div>
         <div className="h-full min-h-0 space-y-5 overflow-y-auto pb-6 pr-1">
           <CandidateWorkspace />
-          <AssemblyTray />
+          <AssemblyTray onOpenPlayer={onOpenPlayer} />
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   DndContext,
@@ -14,9 +14,19 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Check, ChevronDown, Download, GripVertical, Undo2, X } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  Download,
+  GripVertical,
+  Play,
+  Scissors,
+  SkipForward,
+  Undo2,
+  X,
+} from 'lucide-react'
 
-import type { ParsedParagraph, ParsedSentence, TrayClip } from '@/types'
+import type { CandidateClip, ParsedParagraph, ParsedSentence, TrayClip } from '@/types'
 import { useWorkstationStore } from '@/store/useWorkstationStore'
 import { accentBgMap } from '@/utils/accentColors'
 import {
@@ -24,6 +34,8 @@ import {
   getAssemblyProgress,
   getParagraphProgress,
 } from '@/utils/progress'
+
+const CLIP_DRAG_MIME = 'application/x-footage-clip'
 
 type SentenceGroup = {
   sentence: ParsedSentence | null
@@ -37,17 +49,119 @@ type ParagraphGroup = {
   totalClips: number
 }
 
+interface AssemblyTrayProps {
+  onOpenPlayer: () => void
+}
+
+function durationToSeconds(duration: string): number {
+  const [m, s] = duration.split(':').map(Number)
+  return (m || 0) * 60 + (s || 0)
+}
+
 function getTotalDuration(clips: TrayClip[]): string {
   const totalSeconds = clips.reduce((sum, clip) => {
-    const [minutes, seconds] = clip.duration.split(':').map(Number)
-    return sum + minutes * 60 + seconds
+    const full = durationToSeconds(clip.duration)
+    const start = clip.trimStart ?? 0
+    const end = clip.trimEnd ?? full
+    return sum + Math.max(0, end - start)
   }, 0)
 
   const minutes = Math.floor(totalSeconds / 60)
     .toString()
     .padStart(2, '0')
-  const seconds = (totalSeconds % 60).toString().padStart(2, '0')
+  const seconds = (Math.round(totalSeconds) % 60).toString().padStart(2, '0')
   return `${minutes}:${seconds}`
+}
+
+function TrimEditor({
+  clip,
+  onClose,
+}: {
+  clip: TrayClip
+  onClose: () => void
+}) {
+  const setClipTrim = useWorkstationStore(state => state.setClipTrim)
+  const fullDuration = durationToSeconds(clip.duration)
+  const [start, setStart] = useState(clip.trimStart ?? 0)
+  const [end, setEnd] = useState(clip.trimEnd ?? fullDuration)
+
+  const clampedStart = Math.max(0, Math.min(start, fullDuration))
+  const clampedEnd = Math.max(clampedStart, Math.min(end, fullDuration))
+  const segmentLen = Math.max(0, clampedEnd - clampedStart)
+  const usingFull = clampedStart === 0 && clampedEnd === fullDuration
+
+  const save = () => {
+    setClipTrim(
+      clip.id,
+      clampedStart > 0 ? clampedStart : undefined,
+      clampedEnd < fullDuration ? clampedEnd : undefined
+    )
+    onClose()
+  }
+
+  const reset = () => {
+    setStart(0)
+    setEnd(fullDuration)
+    setClipTrim(clip.id, undefined, undefined)
+  }
+
+  return (
+    <div className="space-y-2 border-t border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/80 px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <label className="flex flex-1 items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
+          IN
+          <input
+            type="number"
+            min={0}
+            max={fullDuration}
+            step="0.1"
+            value={start}
+            onChange={e => setStart(Number(e.target.value))}
+            className="font-mono w-full rounded border border-[color:var(--border-subtle)] bg-[color:var(--surface-canvas)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-primary)]"
+          />
+        </label>
+        <label className="flex flex-1 items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
+          OUT
+          <input
+            type="number"
+            min={0}
+            max={fullDuration}
+            step="0.1"
+            value={end}
+            onChange={e => setEnd(Number(e.target.value))}
+            className="font-mono w-full rounded border border-[color:var(--border-subtle)] bg-[color:var(--surface-canvas)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-primary)]"
+          />
+        </label>
+      </div>
+      <p className="font-mono text-[10px] text-[color:var(--text-dim)]">
+        {segmentLen.toFixed(1)}s of {fullDuration}s
+        {usingFull ? ' (full clip)' : ''}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={save}
+          className="flex-1 rounded-[var(--radius-control)] border border-[color:var(--accent-blue)]/30 bg-[color:var(--accent-blue)]/15 px-2 py-1 text-[11px] text-[color:var(--accent-blue)]"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={reset}
+          className="rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] px-2 py-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
+        >
+          Reset
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-[var(--radius-control)] px-2 py-1 text-[11px] text-[color:var(--text-dim)] hover:text-[color:var(--text-primary)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function SortableClipCard({
@@ -57,6 +171,7 @@ function SortableClipCard({
   clip: TrayClip
   onRemove: (id: string) => void
 }) {
+  const [trimOpen, setTrimOpen] = useState(false)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: clip.id })
 
@@ -67,15 +182,21 @@ function SortableClipCard({
     zIndex: isDragging ? 10 : ('auto' as const),
   }
 
+  const hasTrim = clip.trimStart != null || clip.trimEnd != null
+  const fullDuration = durationToSeconds(clip.duration)
+  const start = clip.trimStart ?? 0
+  const end = clip.trimEnd ?? fullDuration
+  const segmentLen = Math.max(0, end - start)
+
   return (
     <article
       ref={setNodeRef}
       style={style}
       {...attributes}
       {...listeners}
-      className={`group relative cursor-grab overflow-hidden rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] active:cursor-grabbing ${
-        isDragging ? 'ring-2 ring-[color:var(--accent-blue)]/40' : ''
-      }`}
+      className={`group relative overflow-hidden rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] ${
+        trimOpen ? '' : 'cursor-grab active:cursor-grabbing'
+      } ${isDragging ? 'ring-2 ring-[color:var(--accent-blue)]/40' : ''}`}
     >
       <div className="relative h-20">
         <img
@@ -87,32 +208,113 @@ function SortableClipCard({
         <div className="pointer-events-none absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-[color:var(--text-dim)] opacity-0 transition-opacity group-hover:opacity-100">
           <GripVertical className="h-3 w-3" />
         </div>
-        <button
-          type="button"
-          onPointerDown={e => e.stopPropagation()}
-          onClick={e => {
-            e.stopPropagation()
-            onRemove(clip.id)
-          }}
-          aria-label="Remove clip"
-          className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-[color:var(--text-dim)] opacity-0 transition-opacity hover:text-[color:var(--text-primary)] group-hover:opacity-100"
-        >
-          <X className="h-3 w-3" />
-        </button>
+        <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            type="button"
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => {
+              e.stopPropagation()
+              setTrimOpen(v => !v)
+            }}
+            aria-label={hasTrim ? 'Edit trim' : 'Trim clip'}
+            className={`flex h-5 w-5 items-center justify-center rounded-full ${
+              hasTrim
+                ? 'bg-[color:var(--accent-blue)]/80 text-white'
+                : 'bg-black/55 text-[color:var(--text-dim)] hover:text-[color:var(--text-primary)]'
+            }`}
+          >
+            <Scissors className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => {
+              e.stopPropagation()
+              onRemove(clip.id)
+            }}
+            aria-label="Remove clip"
+            className="flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-[color:var(--text-dim)] hover:text-[color:var(--text-primary)]"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
       </div>
       <div className="px-3 py-2.5">
         <p className="truncate text-[13px] leading-5 text-[color:var(--text-primary)]">
           {clip.title}
         </p>
-        <p className="font-mono mt-1 text-[11px] text-[color:var(--text-dim)]">
-          {clip.duration}
+        <p className="font-mono mt-1 flex items-center gap-1.5 text-[11px] text-[color:var(--text-dim)]">
+          {hasTrim ? (
+            <>
+              <Scissors className="h-2.5 w-2.5 text-[color:var(--accent-blue)]" />
+              <span className="text-[color:var(--accent-blue)]">
+                {segmentLen.toFixed(1)}s
+              </span>
+              <span>/ {clip.duration}</span>
+            </>
+          ) : (
+            clip.duration
+          )}
         </p>
       </div>
+      {trimOpen ? (
+        <TrimEditor clip={clip} onClose={() => setTrimOpen(false)} />
+      ) : null}
     </article>
   )
 }
 
-export function AssemblyTray() {
+function SentenceDropZone({
+  sentenceId,
+  disabled,
+  children,
+}: {
+  sentenceId: string
+  disabled: boolean
+  children: (state: { isDragOver: boolean }) => React.ReactNode
+}) {
+  const [isDragOver, setIsDragOver] = useState(false)
+  const addClipToSentence = useWorkstationStore(
+    state => state.addClipToSentence
+  )
+
+  if (disabled) {
+    return <>{children({ isDragOver: false })}</>
+  }
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault()
+    setIsDragOver(false)
+    const payload = event.dataTransfer.getData(CLIP_DRAG_MIME)
+    if (!payload) return
+    try {
+      const clip = JSON.parse(payload) as CandidateClip
+      addClipToSentence(clip, sentenceId)
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleDragOver = (event: React.DragEvent) => {
+    if (event.dataTransfer.types.includes(CLIP_DRAG_MIME)) {
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+      setIsDragOver(true)
+    }
+  }
+
+  return (
+    <div
+      onDrop={handleDrop}
+      onDragOver={handleDragOver}
+      onDragLeave={() => setIsDragOver(false)}
+    >
+      {children({ isDragOver })}
+    </div>
+  )
+}
+
+export function AssemblyTray({ onOpenPlayer }: AssemblyTrayProps) {
   const [downloadProgress, setDownloadProgress] = useState(0)
   const [downloadState, setDownloadState] = useState<'idle' | 'loading' | 'done'>(
     'idle'
@@ -126,6 +328,8 @@ export function AssemblyTray() {
 
   const trayClips = useWorkstationStore(state => state.trayClips)
   const paragraphs = useWorkstationStore(state => state.paragraphs)
+  const skippedSentences = useWorkstationStore(state => state.skippedSentences)
+  const activeSentenceId = useWorkstationStore(state => state.activeSentenceId)
   const removeFromTray = useWorkstationStore(state => state.removeFromTray)
   const reorderTray = useWorkstationStore(state => state.reorderTray)
   const isDownloading = useWorkstationStore(state => state.isDownloading)
@@ -133,6 +337,9 @@ export function AssemblyTray() {
   const lastRemovedClip = useWorkstationStore(state => state.lastRemovedClip)
   const undoRemoveFromTray = useWorkstationStore(state => state.undoRemoveFromTray)
   const dismissLastRemoved = useWorkstationStore(state => state.dismissLastRemoved)
+  const toggleSkipSentence = useWorkstationStore(
+    state => state.toggleSkipSentence
+  )
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
@@ -153,68 +360,68 @@ export function AssemblyTray() {
     return () => window.clearTimeout(timeoutId)
   }, [downloadState])
 
-  // Build nested paragraph → sentence → clips structure in script order.
-  const paragraphGroups: ParagraphGroup[] = useMemo(() => {
-    const sentenceMeta = new Map<
-      string,
-      { sentence: ParsedSentence; paragraphId: string; sentenceOrder: number }
-    >()
-    const paragraphMeta = new Map<
-      string,
-      { paragraph: ParsedParagraph; order: number }
-    >()
+  // Auto-scroll active sentence row into view.
+  const activeRowRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!activeSentenceId || !activeRowRef.current) return
+    activeRowRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [activeSentenceId, trayClips.length])
 
-    paragraphs.forEach((paragraph, pIdx) => {
-      paragraphMeta.set(paragraph.id, { paragraph, order: pIdx })
-      paragraph.sentences.forEach(sentence => {
-        sentenceMeta.set(sentence.id, {
+  // Build nested paragraph → sentence → clips structure in script order.
+  // Include every paragraph + sentence (even empty ones) so drop zones exist
+  // for dragging candidates into empty sentences.
+  const paragraphGroups: ParagraphGroup[] = useMemo(() => {
+    const clipsBySentence = new Map<string, TrayClip[]>()
+    for (const clip of trayClips) {
+      const existing = clipsBySentence.get(clip.sentenceId) ?? []
+      existing.push(clip)
+      clipsBySentence.set(clip.sentenceId, existing)
+    }
+
+    const result: ParagraphGroup[] = paragraphs.map((paragraph, pIdx) => {
+      const sentenceGroups: SentenceGroup[] = paragraph.sentences.map(
+        sentence => ({
           sentence,
-          paragraphId: paragraph.id,
-          sentenceOrder: sentence.index,
+          clips: clipsBySentence.get(sentence.id) ?? [],
         })
-      })
+      )
+      const totalClips = sentenceGroups.reduce(
+        (n, g) => n + g.clips.length,
+        0
+      )
+      return {
+        paragraph,
+        paragraphIndex: pIdx,
+        sentenceGroups,
+        totalClips,
+      }
     })
 
-    // Bucket clips by paragraphId → sentenceId
-    const buckets = new Map<string, Map<string, TrayClip[]>>()
-    const ORPHAN_PARAGRAPH = '__orphan__'
-
-    for (const clip of trayClips) {
-      const meta = sentenceMeta.get(clip.sentenceId)
-      const pId = meta?.paragraphId ?? ORPHAN_PARAGRAPH
-      let paraBucket = buckets.get(pId)
-      if (!paraBucket) {
-        paraBucket = new Map()
-        buckets.set(pId, paraBucket)
+    // Orphan clips (sentence not in any paragraph) surface as a final group.
+    const knownIds = new Set(
+      paragraphs.flatMap(p => p.sentences.map(s => s.id))
+    )
+    const orphans = trayClips.filter(c => !knownIds.has(c.sentenceId))
+    if (orphans.length > 0) {
+      const orphansBySentence = new Map<string, TrayClip[]>()
+      for (const clip of orphans) {
+        const list = orphansBySentence.get(clip.sentenceId) ?? []
+        list.push(clip)
+        orphansBySentence.set(clip.sentenceId, list)
       }
-      const existing = paraBucket.get(clip.sentenceId) ?? []
-      existing.push(clip)
-      paraBucket.set(clip.sentenceId, existing)
-    }
-
-    const ORPHAN = Number.MAX_SAFE_INTEGER
-
-    const result: ParagraphGroup[] = []
-    for (const [pId, sentenceBucket] of buckets.entries()) {
-      const pMeta = paragraphMeta.get(pId)
-      const sentenceGroups: SentenceGroup[] = Array.from(sentenceBucket.entries())
-        .map(([sId, clips]) => ({
-          sentence: sentenceMeta.get(sId)?.sentence ?? null,
-          clips,
-          _order: sentenceMeta.get(sId)?.sentenceOrder ?? ORPHAN,
-        }))
-        .sort((a, b) => a._order - b._order)
-        .map(({ sentence, clips }) => ({ sentence, clips }))
-
       result.push({
-        paragraph: pMeta?.paragraph ?? null,
-        paragraphIndex: pMeta?.order ?? ORPHAN,
-        sentenceGroups,
-        totalClips: sentenceGroups.reduce((n, g) => n + g.clips.length, 0),
+        paragraph: null,
+        paragraphIndex: Number.MAX_SAFE_INTEGER,
+        sentenceGroups: Array.from(orphansBySentence.entries()).map(
+          ([, clips]) => ({
+            sentence: null,
+            clips,
+          })
+        ),
+        totalClips: orphans.length,
       })
     }
 
-    result.sort((a, b) => a.paragraphIndex - b.paragraphIndex)
     return result
   }, [trayClips, paragraphs])
 
@@ -251,8 +458,8 @@ export function AssemblyTray() {
   }
 
   const assemblyProgress = useMemo(
-    () => getAssemblyProgress(paragraphs, trayClips),
-    [paragraphs, trayClips]
+    () => getAssemblyProgress(paragraphs, trayClips, skippedSentences),
+    [paragraphs, trayClips, skippedSentences]
   )
 
   const downloadPercent =
@@ -299,15 +506,27 @@ export function AssemblyTray() {
         </div>
 
         <div className="flex flex-col items-end gap-2 self-start lg:mt-2">
-          <button
-            type="button"
-            onClick={() => void handleDownloadAll()}
-            disabled={isDownloading || trayClips.length === 0}
-            className="inline-flex items-center gap-2 rounded-[var(--radius-control)] bg-[radial-gradient(circle_at_top,#8cb0ff_0%,#6d92fb_30%,#5476e1_65%,#3c5ccd_100%)] px-5 py-3 text-sm font-medium text-white shadow-[0_10px_24px_rgba(59,130,246,0.28)] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Download className="h-4 w-4" />
-            {downloadLabel}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenPlayer}
+              disabled={trayClips.length === 0}
+              className="inline-flex items-center gap-2 rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] px-4 py-3 text-sm text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+              title="Play full sequence (P)"
+            >
+              <Play className="h-4 w-4" />
+              Play sequence
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleDownloadAll()}
+              disabled={isDownloading || trayClips.length === 0}
+              className="inline-flex items-center gap-2 rounded-[var(--radius-control)] bg-[radial-gradient(circle_at_top,#8cb0ff_0%,#6d92fb_30%,#5476e1_65%,#3c5ccd_100%)] px-5 py-3 text-sm font-medium text-white shadow-[0_10px_24px_rgba(59,130,246,0.28)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Download className="h-4 w-4" />
+              {downloadLabel}
+            </button>
+          </div>
           {downloadState === 'loading' ? (
             <div className="h-1 w-48 overflow-hidden rounded-full bg-[color:var(--surface-muted)]">
               <div
@@ -319,9 +538,9 @@ export function AssemblyTray() {
         </div>
       </div>
 
-      {trayClips.length === 0 ? (
+      {paragraphs.length === 0 ? (
         <div className="mt-5 flex min-h-[120px] items-center justify-center rounded-[var(--radius-card)] border border-dashed border-[color:var(--border-subtle)] bg-[color:var(--surface-canvas)]/40 text-sm text-[color:var(--text-muted)]">
-          No clips yet. Click <span className="mx-1 text-[color:var(--text-primary)]">Add to assembly</span> on any candidate above.
+          No transcript loaded yet.
         </div>
       ) : (
         <DndContext
@@ -341,11 +560,17 @@ export function AssemblyTray() {
                   'Unlinked clips'
 
                 const progress = pGroup.paragraph
-                  ? getParagraphProgress(pGroup.paragraph, trayClips)
+                  ? getParagraphProgress(
+                      pGroup.paragraph,
+                      trayClips,
+                      skippedSentences
+                    )
                   : null
                 const paragraphPercent = progress
                   ? progress.clipTarget === 0
-                    ? 0
+                    ? progress.isComplete
+                      ? 100
+                      : 0
                     : (progress.clips / progress.clipTarget) * 100
                   : 0
 
@@ -358,7 +583,6 @@ export function AssemblyTray() {
                         : 'border-[color:var(--border-subtle)]'
                     }`}
                   >
-                    {/* Paragraph header */}
                     <button
                       type="button"
                       aria-expanded={!isParagraphCollapsed}
@@ -403,7 +627,7 @@ export function AssemblyTray() {
                         </span>
                       )}
                     </button>
-                    {progress && progress.clipTarget > 0 ? (
+                    {progress ? (
                       <div className="h-0.5 bg-[color:var(--surface-muted)]">
                         <div
                           className={`h-full transition-[width] duration-300 ${
@@ -416,7 +640,6 @@ export function AssemblyTray() {
                       </div>
                     ) : null}
 
-                    {/* Nested sentences */}
                     {!isParagraphCollapsed ? (
                       <div className="space-y-3 border-t border-[color:var(--border-subtle)] px-3 py-3">
                         {pGroup.sentenceGroups.map(sGroup => {
@@ -427,72 +650,159 @@ export function AssemblyTray() {
                             ? `P${pNumber}-S${sNumber}`
                             : `P${pNumber}-?`
 
+                          const sentenceId = sGroup.sentence?.id ?? ''
+                          const isSkipped = Boolean(
+                            sentenceId && skippedSentences[sentenceId]
+                          )
                           const sentenceClipCount = sGroup.clips.length
                           const sentenceComplete =
+                            isSkipped ||
                             sentenceClipCount >= MAX_CLIPS_PER_SENTENCE
-                          const sentencePercent =
-                            (sentenceClipCount / MAX_CLIPS_PER_SENTENCE) * 100
+                          const sentencePercent = isSkipped
+                            ? 100
+                            : (sentenceClipCount / MAX_CLIPS_PER_SENTENCE) * 100
+                          const isActiveRow =
+                            sentenceId && sentenceId === activeSentenceId
 
                           return (
-                            <div key={sId}>
-                              <button
-                                type="button"
-                                aria-expanded={!isSentenceCollapsed}
-                                onClick={() => toggleSentence(sId)}
-                                className="mb-2 flex w-full items-center gap-2 rounded-[var(--radius-control)] px-1 py-1 text-left hover:bg-[color:var(--surface-muted)]"
-                              >
-                                <ChevronDown
-                                  className={`h-3.5 w-3.5 shrink-0 text-[color:var(--text-dim)] transition-transform ${
-                                    isSentenceCollapsed ? '-rotate-90' : ''
-                                  }`}
-                                />
-                                {sGroup.sentence ? (
-                                  <span
-                                    className={`h-2 w-2 shrink-0 rounded-full ${accentBgMap[sGroup.sentence.accent]}`}
-                                  />
-                                ) : null}
-                                <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-dim)]">
-                                  {label}
-                                </span>
-                                <p className="line-clamp-1 flex-1 text-[12px] text-[color:var(--text-muted)]">
-                                  {sGroup.sentence?.text ?? 'Unlinked clips'}
-                                </p>
-                                <div className="hidden h-1 w-20 shrink-0 overflow-hidden rounded-full bg-[color:var(--surface-raised)] md:block">
-                                  <div
-                                    className={`h-full transition-[width] duration-300 ${
-                                      sentenceComplete
-                                        ? 'bg-[color:var(--accent-emerald)]'
-                                        : 'bg-[color:var(--accent-blue)]'
-                                    }`}
-                                    style={{ width: `${sentencePercent}%` }}
-                                  />
-                                </div>
-                                <span
-                                  className={`font-mono inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${
-                                    sentenceComplete
-                                      ? 'bg-[color:var(--accent-emerald)]/15 text-[color:var(--accent-emerald)]'
-                                      : 'bg-[color:var(--surface-raised)] text-[color:var(--text-muted)]'
-                                  }`}
+                            <SentenceDropZone
+                              key={sId}
+                              sentenceId={sentenceId}
+                              disabled={
+                                !sentenceId ||
+                                isSkipped ||
+                                sentenceClipCount >= MAX_CLIPS_PER_SENTENCE
+                              }
+                            >
+                              {({ isDragOver }) => (
+                                <div
+                                  ref={isActiveRow ? activeRowRef : undefined}
+                                  className={`rounded-[var(--radius-control)] transition-colors ${
+                                    isDragOver
+                                      ? 'bg-[color:var(--accent-blue)]/10 ring-1 ring-[color:var(--accent-blue)]/40'
+                                      : ''
+                                  } ${isSkipped ? 'opacity-70' : ''}`}
                                 >
-                                  {sentenceComplete ? (
-                                    <Check className="h-2.5 w-2.5" />
-                                  ) : null}
-                                  {sentenceClipCount}/{MAX_CLIPS_PER_SENTENCE}
-                                </span>
-                              </button>
-
-                              {!isSentenceCollapsed ? (
-                                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-                                  {sGroup.clips.map(clip => (
-                                    <SortableClipCard
-                                      key={clip.id}
-                                      clip={clip}
-                                      onRemove={removeFromTray}
+                                  <button
+                                    type="button"
+                                    aria-expanded={!isSentenceCollapsed}
+                                    onClick={() => toggleSentence(sId)}
+                                    className="mb-2 flex w-full items-center gap-2 rounded-[var(--radius-control)] px-1 py-1 text-left hover:bg-[color:var(--surface-muted)]"
+                                  >
+                                    <ChevronDown
+                                      className={`h-3.5 w-3.5 shrink-0 text-[color:var(--text-dim)] transition-transform ${
+                                        isSentenceCollapsed ? '-rotate-90' : ''
+                                      }`}
                                     />
-                                  ))}
+                                    {sGroup.sentence ? (
+                                      <span
+                                        className={`h-2 w-2 shrink-0 rounded-full ${accentBgMap[sGroup.sentence.accent]}`}
+                                      />
+                                    ) : null}
+                                    <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-dim)]">
+                                      {label}
+                                    </span>
+                                    <p
+                                      className={`line-clamp-1 flex-1 text-[12px] text-[color:var(--text-muted)] ${
+                                        isSkipped ? 'line-through' : ''
+                                      }`}
+                                    >
+                                      {sGroup.sentence?.text ?? 'Unlinked clips'}
+                                    </p>
+                                    <div className="hidden h-1 w-20 shrink-0 overflow-hidden rounded-full bg-[color:var(--surface-raised)] md:block">
+                                      <div
+                                        className={`h-full transition-[width] duration-300 ${
+                                          sentenceComplete
+                                            ? isSkipped
+                                              ? 'bg-[color:var(--accent-amber)]'
+                                              : 'bg-[color:var(--accent-emerald)]'
+                                            : 'bg-[color:var(--accent-blue)]'
+                                        }`}
+                                        style={{ width: `${sentencePercent}%` }}
+                                      />
+                                    </div>
+                                    <span
+                                      className={`font-mono inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${
+                                        isSkipped
+                                          ? 'bg-[color:var(--accent-amber)]/15 text-[color:var(--accent-amber)]'
+                                          : sentenceComplete
+                                            ? 'bg-[color:var(--accent-emerald)]/15 text-[color:var(--accent-emerald)]'
+                                            : 'bg-[color:var(--surface-raised)] text-[color:var(--text-muted)]'
+                                      }`}
+                                    >
+                                      {isSkipped ? (
+                                        'Skipped'
+                                      ) : (
+                                        <>
+                                          {sentenceComplete ? (
+                                            <Check className="h-2.5 w-2.5" />
+                                          ) : null}
+                                          {sentenceClipCount}/{MAX_CLIPS_PER_SENTENCE}
+                                        </>
+                                      )}
+                                    </span>
+                                    {sentenceId ? (
+                                      <span
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-label={
+                                          isSkipped
+                                            ? 'Unskip sentence'
+                                            : 'Skip sentence'
+                                        }
+                                        onClick={event => {
+                                          event.stopPropagation()
+                                          toggleSkipSentence(sentenceId)
+                                        }}
+                                        onKeyDown={event => {
+                                          if (
+                                            event.key === 'Enter' ||
+                                            event.key === ' '
+                                          ) {
+                                            event.preventDefault()
+                                            event.stopPropagation()
+                                            toggleSkipSentence(sentenceId)
+                                          }
+                                        }}
+                                        className={`inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border ${
+                                          isSkipped
+                                            ? 'border-[color:var(--accent-amber)]/40 text-[color:var(--accent-amber)]'
+                                            : 'border-[color:var(--border-subtle)] text-[color:var(--text-dim)] hover:text-[color:var(--text-primary)]'
+                                        }`}
+                                      >
+                                        <SkipForward className="h-2.5 w-2.5" />
+                                      </span>
+                                    ) : null}
+                                  </button>
+
+                                  {!isSentenceCollapsed ? (
+                                    sGroup.clips.length > 0 ? (
+                                      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+                                        {sGroup.clips.map(clip => (
+                                          <SortableClipCard
+                                            key={clip.id}
+                                            clip={clip}
+                                            onRemove={removeFromTray}
+                                          />
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div
+                                        className={`flex min-h-[56px] items-center justify-center rounded-[var(--radius-control)] border border-dashed px-4 py-2 text-[11px] ${
+                                          isDragOver
+                                            ? 'border-[color:var(--accent-blue)]/50 text-[color:var(--accent-blue)]'
+                                            : 'border-[color:var(--border-subtle)] text-[color:var(--text-dim)]'
+                                        }`}
+                                      >
+                                        {isSkipped
+                                          ? 'Marked as no footage needed'
+                                          : 'Drop candidate clips here'}
+                                      </div>
+                                    )
+                                  ) : null}
                                 </div>
-                              ) : null}
-                            </div>
+                              )}
+                            </SentenceDropZone>
                           )
                         })}
                       </div>

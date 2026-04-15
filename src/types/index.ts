@@ -32,4 +32,8 @@ export type TrayClip = CandidateClip & {
   sentenceId: string
   sentenceAccent: string
   order: number
+  /** Optional trim-in point in seconds. Undefined = clip start. */
+  trimStart?: number
+  /** Optional trim-out point in seconds. Undefined = clip end. */
+  trimEnd?: number
 }

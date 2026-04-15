@@ -1,4 +1,6 @@
 export { TranscriptInput } from './TranscriptInput'
 export { AssemblyTray } from './AssemblyTray'
+export { AssemblyPlayer } from './AssemblyPlayer'
 export { CandidateWorkspace } from './CandidateWorkspace'
 export { ScriptNavigator } from './ScriptNavigator'
+export { ShortcutsHelp } from './ShortcutsHelp'
