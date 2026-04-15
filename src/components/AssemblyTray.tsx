@@ -14,11 +14,23 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Download, GripVertical, Undo2, X } from 'lucide-react'
+import { ChevronDown, Download, GripVertical, Undo2, X } from 'lucide-react'
 
-import type { ParsedSentence, TrayClip } from '@/types'
+import type { ParsedParagraph, ParsedSentence, TrayClip } from '@/types'
 import { useWorkstationStore } from '@/store/useWorkstationStore'
 import { accentBgMap } from '@/utils/accentColors'
+
+type SentenceGroup = {
+  sentence: ParsedSentence | null
+  clips: TrayClip[]
+}
+
+type ParagraphGroup = {
+  paragraph: ParsedParagraph | null
+  paragraphIndex: number
+  sentenceGroups: SentenceGroup[]
+  totalClips: number
+}
 
 function getTotalDuration(clips: TrayClip[]): string {
   const totalSeconds = clips.reduce((sum, clip) => {
@@ -47,7 +59,7 @@ function SortableClipCard({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    zIndex: isDragging ? 10 : 'auto' as const,
+    zIndex: isDragging ? 10 : ('auto' as const),
   }
 
   return (
@@ -100,6 +112,12 @@ export function AssemblyTray() {
   const [downloadState, setDownloadState] = useState<'idle' | 'loading' | 'done'>(
     'idle'
   )
+  const [collapsedParagraphs, setCollapsedParagraphs] = useState<Set<string>>(
+    new Set()
+  )
+  const [collapsedSentences, setCollapsedSentences] = useState<Set<string>>(
+    new Set()
+  )
 
   const trayClips = useWorkstationStore(state => state.trayClips)
   const paragraphs = useWorkstationStore(state => state.paragraphs)
@@ -130,45 +148,69 @@ export function AssemblyTray() {
     return () => window.clearTimeout(timeoutId)
   }, [downloadState])
 
-  const grouped = useMemo(() => {
-    // Build a sentence-order index so groups render in script order
-    // (S1 before S2 etc.), regardless of when the user added clips.
-    const sentenceMap = new Map<string, ParsedSentence>()
-    const orderBySentenceId = new Map<string, number>()
-    let orderCursor = 0
-    for (const paragraph of paragraphs) {
-      for (const sentence of paragraph.sentences) {
-        sentenceMap.set(sentence.id, sentence)
-        orderBySentenceId.set(sentence.id, orderCursor++)
-      }
-    }
-
-    const groupsBySentence = new Map<
+  // Build nested paragraph → sentence → clips structure in script order.
+  const paragraphGroups: ParagraphGroup[] = useMemo(() => {
+    const sentenceMeta = new Map<
       string,
-      { sentence: ParsedSentence | null; clips: TrayClip[] }
+      { sentence: ParsedSentence; paragraphId: string; sentenceOrder: number }
     >()
-    for (const clip of trayClips) {
-      const existing = groupsBySentence.get(clip.sentenceId)
-      if (existing) {
-        existing.clips.push(clip)
-      } else {
-        groupsBySentence.set(clip.sentenceId, {
-          sentence: sentenceMap.get(clip.sentenceId) ?? null,
-          clips: [clip],
+    const paragraphMeta = new Map<
+      string,
+      { paragraph: ParsedParagraph; order: number }
+    >()
+
+    paragraphs.forEach((paragraph, pIdx) => {
+      paragraphMeta.set(paragraph.id, { paragraph, order: pIdx })
+      paragraph.sentences.forEach(sentence => {
+        sentenceMeta.set(sentence.id, {
+          sentence,
+          paragraphId: paragraph.id,
+          sentenceOrder: sentence.index,
         })
+      })
+    })
+
+    // Bucket clips by paragraphId → sentenceId
+    const buckets = new Map<string, Map<string, TrayClip[]>>()
+    const ORPHAN_PARAGRAPH = '__orphan__'
+
+    for (const clip of trayClips) {
+      const meta = sentenceMeta.get(clip.sentenceId)
+      const pId = meta?.paragraphId ?? ORPHAN_PARAGRAPH
+      let paraBucket = buckets.get(pId)
+      if (!paraBucket) {
+        paraBucket = new Map()
+        buckets.set(pId, paraBucket)
       }
+      const existing = paraBucket.get(clip.sentenceId) ?? []
+      existing.push(clip)
+      paraBucket.set(clip.sentenceId, existing)
     }
 
-    // Sentences not in the script (orphans) sort to the end, preserving
-    // insertion order relative to each other.
     const ORPHAN = Number.MAX_SAFE_INTEGER
-    return Array.from(groupsBySentence.entries())
-      .sort(([a], [b]) => {
-        const ai = orderBySentenceId.get(a) ?? ORPHAN
-        const bi = orderBySentenceId.get(b) ?? ORPHAN
-        return ai - bi
+
+    const result: ParagraphGroup[] = []
+    for (const [pId, sentenceBucket] of buckets.entries()) {
+      const pMeta = paragraphMeta.get(pId)
+      const sentenceGroups: SentenceGroup[] = Array.from(sentenceBucket.entries())
+        .map(([sId, clips]) => ({
+          sentence: sentenceMeta.get(sId)?.sentence ?? null,
+          clips,
+          _order: sentenceMeta.get(sId)?.sentenceOrder ?? ORPHAN,
+        }))
+        .sort((a, b) => a._order - b._order)
+        .map(({ sentence, clips }) => ({ sentence, clips }))
+
+      result.push({
+        paragraph: pMeta?.paragraph ?? null,
+        paragraphIndex: pMeta?.order ?? ORPHAN,
+        sentenceGroups,
+        totalClips: sentenceGroups.reduce((n, g) => n + g.clips.length, 0),
       })
-      .map(([, group]) => group)
+    }
+
+    result.sort((a, b) => a.paragraphIndex - b.paragraphIndex)
+    return result
   }, [trayClips, paragraphs])
 
   async function handleDownloadAll() {
@@ -183,6 +225,24 @@ export function AssemblyTray() {
     const { active, over } = event
     if (!over || active.id === over.id) return
     reorderTray(String(active.id), String(over.id))
+  }
+
+  function toggleParagraph(id: string) {
+    setCollapsedParagraphs(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSentence(id: string) {
+    setCollapsedSentences(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   const downloadPercent =
@@ -240,36 +300,103 @@ export function AssemblyTray() {
           onDragEnd={handleDragEnd}
         >
           <SortableContext items={trayIds} strategy={horizontalListSortingStrategy}>
-            <div className="mt-5 space-y-4">
-              {grouped.map(group => (
-                <div key={group.sentence?.id ?? 'unknown'}>
-                  {group.sentence ? (
-                    <div className="mb-2 flex items-center gap-2 px-1">
-                      <span
-                        className={`h-2.5 w-2.5 rounded-full ${accentBgMap[group.sentence.accent]}`}
+            <div className="mt-5 space-y-3">
+              {paragraphGroups.map(pGroup => {
+                const pId = pGroup.paragraph?.id ?? 'orphan'
+                const pNumber = (pGroup.paragraph?.index ?? pGroup.paragraphIndex) + 1
+                const isParagraphCollapsed = collapsedParagraphs.has(pId)
+                const paragraphPreview =
+                  pGroup.paragraph?.sentences[0]?.text ??
+                  pGroup.paragraph?.label ??
+                  'Unlinked clips'
+
+                return (
+                  <div
+                    key={pId}
+                    className="overflow-hidden rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)]/50"
+                  >
+                    {/* Paragraph header */}
+                    <button
+                      type="button"
+                      aria-expanded={!isParagraphCollapsed}
+                      onClick={() => toggleParagraph(pId)}
+                      className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-[color:var(--surface-muted)]"
+                    >
+                      <ChevronDown
+                        className={`h-4 w-4 shrink-0 text-[color:var(--text-muted)] transition-transform ${
+                          isParagraphCollapsed ? '-rotate-90' : ''
+                        }`}
                       />
-                      <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-dim)]">
-                        S{group.sentence.index + 1}
-                      </p>
-                      <p className="line-clamp-1 flex-1 text-[12px] text-[color:var(--text-muted)]">
-                        {group.sentence.text}
-                      </p>
-                      <span className="font-mono rounded-full bg-[color:var(--surface-muted)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
-                        {group.clips.length}
+                      <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-dim)]">
+                        P{pNumber}
                       </span>
-                    </div>
-                  ) : null}
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-                    {group.clips.map(clip => (
-                      <SortableClipCard
-                        key={clip.id}
-                        clip={clip}
-                        onRemove={removeFromTray}
-                      />
-                    ))}
+                      <p className="line-clamp-1 flex-1 text-[13px] text-[color:var(--text-primary)]">
+                        {paragraphPreview}
+                      </p>
+                      <span className="font-mono rounded-full bg-[color:var(--surface-raised)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
+                        {pGroup.totalClips} {pGroup.totalClips === 1 ? 'clip' : 'clips'}
+                      </span>
+                    </button>
+
+                    {/* Nested sentences */}
+                    {!isParagraphCollapsed ? (
+                      <div className="space-y-3 border-t border-[color:var(--border-subtle)] px-3 py-3">
+                        {pGroup.sentenceGroups.map(sGroup => {
+                          const sId = sGroup.sentence?.id ?? `${pId}-orphan`
+                          const sNumber = (sGroup.sentence?.index ?? 0) + 1
+                          const isSentenceCollapsed = collapsedSentences.has(sId)
+                          const label = sGroup.sentence
+                            ? `P${pNumber}-S${sNumber}`
+                            : `P${pNumber}-?`
+
+                          return (
+                            <div key={sId}>
+                              <button
+                                type="button"
+                                aria-expanded={!isSentenceCollapsed}
+                                onClick={() => toggleSentence(sId)}
+                                className="mb-2 flex w-full items-center gap-2 rounded-[var(--radius-control)] px-1 py-1 text-left hover:bg-[color:var(--surface-muted)]"
+                              >
+                                <ChevronDown
+                                  className={`h-3.5 w-3.5 shrink-0 text-[color:var(--text-dim)] transition-transform ${
+                                    isSentenceCollapsed ? '-rotate-90' : ''
+                                  }`}
+                                />
+                                {sGroup.sentence ? (
+                                  <span
+                                    className={`h-2 w-2 shrink-0 rounded-full ${accentBgMap[sGroup.sentence.accent]}`}
+                                  />
+                                ) : null}
+                                <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-dim)]">
+                                  {label}
+                                </span>
+                                <p className="line-clamp-1 flex-1 text-[12px] text-[color:var(--text-muted)]">
+                                  {sGroup.sentence?.text ?? 'Unlinked clips'}
+                                </p>
+                                <span className="font-mono rounded-full bg-[color:var(--surface-raised)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
+                                  {sGroup.clips.length}
+                                </span>
+                              </button>
+
+                              {!isSentenceCollapsed ? (
+                                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+                                  {sGroup.clips.map(clip => (
+                                    <SortableClipCard
+                                      key={clip.id}
+                                      clip={clip}
+                                      onRemove={removeFromTray}
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </SortableContext>
         </DndContext>
