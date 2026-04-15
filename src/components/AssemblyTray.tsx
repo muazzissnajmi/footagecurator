@@ -46,14 +46,19 @@ function SortableClipCard({
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.6 : 1,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : 'auto' as const,
   }
 
   return (
     <article
       ref={setNodeRef}
       style={style}
-      className="overflow-hidden rounded-[18px] border border-[color:var(--border-subtle)] bg-[linear-gradient(180deg,#161d1f_0%,#141a1c_100%)]"
+      {...attributes}
+      {...listeners}
+      className={`group relative cursor-grab overflow-hidden rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] active:cursor-grabbing ${
+        isDragging ? 'ring-2 ring-[color:var(--accent-blue)]/40' : ''
+      }`}
     >
       <div className="relative h-20">
         <img
@@ -61,21 +66,19 @@ function SortableClipCard({
           alt={clip.title}
           className="h-full w-full object-cover"
         />
-        <div className={`absolute inset-y-0 left-0 w-1.5 ${clip.sentenceAccent}`} />
-        <button
-          type="button"
-          {...attributes}
-          {...listeners}
-          aria-label="Drag to reorder"
-          className="absolute left-2 top-2 flex h-5 w-5 cursor-grab items-center justify-center rounded-full bg-black/45 text-[color:var(--text-dim)] active:cursor-grabbing"
-        >
+        <div className={`absolute inset-y-0 left-0 w-1 ${clip.sentenceAccent}`} />
+        <div className="pointer-events-none absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-[color:var(--text-dim)] opacity-0 transition-opacity group-hover:opacity-100">
           <GripVertical className="h-3 w-3" />
-        </button>
+        </div>
         <button
           type="button"
-          onClick={() => onRemove(clip.id)}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => {
+            e.stopPropagation()
+            onRemove(clip.id)
+          }}
           aria-label="Remove clip"
-          className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/45 text-[color:var(--text-dim)]"
+          className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-[color:var(--text-dim)] opacity-0 transition-opacity hover:text-[color:var(--text-primary)] group-hover:opacity-100"
         >
           <X className="h-3 w-3" />
         </button>
@@ -109,10 +112,9 @@ export function AssemblyTray() {
   const dismissLastRemoved = useWorkstationStore(state => state.dismissLastRemoved)
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   )
 
-  // Auto-dismiss undo toast after 6s
   useEffect(() => {
     if (!lastRemovedClip) return
     const id = window.setTimeout(dismissLastRemoved, 6000)
@@ -128,7 +130,6 @@ export function AssemblyTray() {
     return () => window.clearTimeout(timeoutId)
   }, [downloadState])
 
-  // Group clips by sentence, preserving tray order within each group.
   const grouped = useMemo(() => {
     const sentenceMap = new Map<string, ParsedSentence>()
     for (const paragraph of paragraphs) {
@@ -139,10 +140,9 @@ export function AssemblyTray() {
     const groups: { sentence: ParsedSentence | null; clips: TrayClip[] }[] = []
     const indexByKey = new Map<string, number>()
     for (const clip of trayClips) {
-      const key = clip.sentenceId
-      const existing = indexByKey.get(key)
+      const existing = indexByKey.get(clip.sentenceId)
       if (existing === undefined) {
-        indexByKey.set(key, groups.length)
+        indexByKey.set(clip.sentenceId, groups.length)
         groups.push({
           sentence: sentenceMap.get(clip.sentenceId) ?? null,
           clips: [clip],
@@ -168,47 +168,53 @@ export function AssemblyTray() {
     reorderTray(String(active.id), String(over.id))
   }
 
+  const downloadPercent =
+    trayClips.length > 0 ? (downloadProgress / trayClips.length) * 100 : 0
   const downloadLabel =
     downloadState === 'loading'
-      ? `Downloading ${Math.min(downloadProgress, trayClips.length)}/${trayClips.length}...`
+      ? `Downloading ${Math.min(downloadProgress, trayClips.length)}/${trayClips.length}`
       : downloadState === 'done'
-        ? 'Done! ✓'
+        ? 'Done ✓'
         : `Download All (${trayClips.length})`
 
   const trayIds = trayClips.map(c => c.id)
 
   return (
-    <section className="relative rounded-[30px] border border-[color:var(--border-subtle)] bg-[linear-gradient(180deg,#101415_0%,#0d1011_100%)] px-5 py-5 shadow-[0_28px_90px_rgba(0,0,0,0.26)] lg:px-6">
+    <section className="relative rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-panel)] px-5 py-5 lg:px-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="font-display text-[11px] uppercase tracking-[0.3em] text-[color:var(--text-dim)]">
-            Assembly - Section 01
+          <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-[color:var(--text-dim)]">
+            Assembly
           </p>
-          <p className="mt-2 text-sm text-[color:var(--text-muted)]">
-            {trayClips.length} clips in tray • {getTotalDuration(trayClips)}
+          <p className="mt-1.5 text-sm text-[color:var(--text-muted)]">
+            {trayClips.length} clips • {getTotalDuration(trayClips)}
           </p>
         </div>
 
-        <div className="flex items-center gap-4 self-start lg:mt-6">
-          <label className="flex items-center gap-2 text-sm text-[color:var(--text-dim)]">
-            <span className="h-3 w-3 rounded-sm border border-[color:var(--border-strong)] bg-transparent" />
-            Auto-match
-          </label>
+        <div className="flex flex-col items-end gap-2 self-start lg:mt-2">
           <button
             type="button"
             onClick={() => void handleDownloadAll()}
             disabled={isDownloading || trayClips.length === 0}
-            className="inline-flex items-center gap-2 rounded-2xl bg-[radial-gradient(circle_at_top,#8cb0ff_0%,#6d92fb_30%,#5476e1_65%,#3c5ccd_100%)] px-5 py-3 text-sm font-medium text-white shadow-[0_14px_30px_rgba(59,130,246,0.34)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-[var(--radius-control)] bg-[radial-gradient(circle_at_top,#8cb0ff_0%,#6d92fb_30%,#5476e1_65%,#3c5ccd_100%)] px-5 py-3 text-sm font-medium text-white shadow-[0_10px_24px_rgba(59,130,246,0.28)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Download className="h-4 w-4" />
             {downloadLabel}
           </button>
+          {downloadState === 'loading' ? (
+            <div className="h-1 w-48 overflow-hidden rounded-full bg-[color:var(--surface-muted)]">
+              <div
+                className="h-full bg-[color:var(--accent-blue)] transition-[width] duration-300"
+                style={{ width: `${downloadPercent}%` }}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
       {trayClips.length === 0 ? (
-        <div className="mt-5 flex min-h-[128px] items-center justify-center rounded-[18px] border border-dashed border-[color:var(--border-subtle)] bg-transparent text-sm text-[color:var(--text-dim)]">
-          No clips in assembly yet. Add candidates from the workspace above.
+        <div className="mt-5 flex min-h-[120px] items-center justify-center rounded-[var(--radius-card)] border border-dashed border-[color:var(--border-subtle)] bg-[color:var(--surface-canvas)]/40 text-sm text-[color:var(--text-muted)]">
+          No clips yet. Click <span className="mx-1 text-[color:var(--text-primary)]">Add to assembly</span> on any candidate above.
         </div>
       ) : (
         <DndContext
@@ -231,12 +237,12 @@ export function AssemblyTray() {
                       <p className="line-clamp-1 flex-1 text-[12px] text-[color:var(--text-muted)]">
                         {group.sentence.text}
                       </p>
-                      <span className="font-mono text-[10px] text-[color:var(--text-dim)]">
+                      <span className="font-mono rounded-full bg-[color:var(--surface-muted)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
                         {group.clips.length}
                       </span>
                     </div>
                   ) : null}
-                  <div className="hide-scrollbar grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
                     {group.clips.map(clip => (
                       <SortableClipCard
                         key={clip.id}
@@ -255,13 +261,13 @@ export function AssemblyTray() {
       {lastRemovedClip ? (
         <div
           role="status"
-          className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-[color:var(--border-subtle)] bg-[color:var(--surface-panel)] px-4 py-3 text-sm text-[color:var(--text-primary)] shadow-[0_18px_40px_rgba(0,0,0,0.45)]"
+          className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)] px-4 py-3 text-sm text-[color:var(--text-primary)] shadow-[0_18px_40px_rgba(0,0,0,0.45)]"
         >
           <span className="text-[color:var(--text-muted)]">Removed clip</span>
           <button
             type="button"
             onClick={undoRemoveFromTray}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[color:var(--accent-blue)]/30 bg-[color:var(--accent-blue)]/14 px-2.5 py-1 text-[color:var(--accent-blue)]"
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-control)] border border-[color:var(--accent-blue)]/30 bg-[color:var(--accent-blue)]/15 px-2.5 py-1 text-[color:var(--accent-blue)]"
           >
             <Undo2 className="h-3.5 w-3.5" />
             Undo
@@ -270,7 +276,7 @@ export function AssemblyTray() {
             type="button"
             onClick={dismissLastRemoved}
             aria-label="Dismiss"
-            className="text-[color:var(--text-dim)]"
+            className="text-[color:var(--text-dim)] hover:text-[color:var(--text-primary)]"
           >
             <X className="h-3.5 w-3.5" />
           </button>
