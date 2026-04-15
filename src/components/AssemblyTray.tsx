@@ -14,11 +14,16 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { ChevronDown, Download, GripVertical, Undo2, X } from 'lucide-react'
+import { Check, ChevronDown, Download, GripVertical, Undo2, X } from 'lucide-react'
 
 import type { ParsedParagraph, ParsedSentence, TrayClip } from '@/types'
 import { useWorkstationStore } from '@/store/useWorkstationStore'
 import { accentBgMap } from '@/utils/accentColors'
+import {
+  MAX_CLIPS_PER_SENTENCE,
+  getAssemblyProgress,
+  getParagraphProgress,
+} from '@/utils/progress'
 
 type SentenceGroup = {
   sentence: ParsedSentence | null
@@ -245,6 +250,11 @@ export function AssemblyTray() {
     })
   }
 
+  const assemblyProgress = useMemo(
+    () => getAssemblyProgress(paragraphs, trayClips),
+    [paragraphs, trayClips]
+  )
+
   const downloadPercent =
     trayClips.length > 0 ? (downloadProgress / trayClips.length) * 100 : 0
   const downloadLabel =
@@ -259,13 +269,33 @@ export function AssemblyTray() {
   return (
     <section className="relative rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-panel)] px-5 py-5 lg:px-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-[color:var(--text-dim)]">
             Assembly
           </p>
           <p className="mt-1.5 text-sm text-[color:var(--text-muted)]">
-            {trayClips.length} clips • {getTotalDuration(trayClips)}
+            <span className="text-[color:var(--text-primary)]">
+              {assemblyProgress.clips} / {assemblyProgress.clipTarget || 0} clips
+            </span>
+            <span className="mx-2 text-[color:var(--text-dim)]">•</span>
+            <span>
+              {assemblyProgress.completedSentences} / {assemblyProgress.totalSentences} sentences complete
+            </span>
+            <span className="mx-2 text-[color:var(--text-dim)]">•</span>
+            <span className="font-mono text-[color:var(--text-muted)]">
+              {getTotalDuration(trayClips)}
+            </span>
           </p>
+          {assemblyProgress.clipTarget > 0 ? (
+            <div className="mt-2 h-1 max-w-md overflow-hidden rounded-full bg-[color:var(--surface-muted)]">
+              <div
+                className="h-full bg-[color:var(--accent-blue)] transition-[width] duration-300"
+                style={{
+                  width: `${(assemblyProgress.clips / assemblyProgress.clipTarget) * 100}%`,
+                }}
+              />
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-col items-end gap-2 self-start lg:mt-2">
@@ -310,10 +340,23 @@ export function AssemblyTray() {
                   pGroup.paragraph?.label ??
                   'Unlinked clips'
 
+                const progress = pGroup.paragraph
+                  ? getParagraphProgress(pGroup.paragraph, trayClips)
+                  : null
+                const paragraphPercent = progress
+                  ? progress.clipTarget === 0
+                    ? 0
+                    : (progress.clips / progress.clipTarget) * 100
+                  : 0
+
                 return (
                   <div
                     key={pId}
-                    className="overflow-hidden rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)]/50"
+                    className={`overflow-hidden rounded-[var(--radius-card)] border bg-[color:var(--surface-muted)]/50 ${
+                      progress?.isComplete
+                        ? 'border-[color:var(--accent-emerald)]/35'
+                        : 'border-[color:var(--border-subtle)]'
+                    }`}
                   >
                     {/* Paragraph header */}
                     <button
@@ -333,10 +376,45 @@ export function AssemblyTray() {
                       <p className="line-clamp-1 flex-1 text-[13px] text-[color:var(--text-primary)]">
                         {paragraphPreview}
                       </p>
-                      <span className="font-mono rounded-full bg-[color:var(--surface-raised)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
-                        {pGroup.totalClips} {pGroup.totalClips === 1 ? 'clip' : 'clips'}
-                      </span>
+                      {progress ? (
+                        <>
+                          <span className="font-mono hidden rounded-full bg-[color:var(--surface-raised)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)] sm:inline">
+                            {progress.completedSentences}/{progress.totalSentences} sentences
+                          </span>
+                          <span
+                            className={`font-mono rounded-full px-2 py-0.5 text-[10px] ${
+                              progress.isComplete
+                                ? 'bg-[color:var(--accent-emerald)]/15 text-[color:var(--accent-emerald)]'
+                                : 'bg-[color:var(--surface-raised)] text-[color:var(--text-muted)]'
+                            }`}
+                          >
+                            {progress.clips}/{progress.clipTarget} clips
+                          </span>
+                          {progress.isComplete ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[color:var(--accent-emerald)]/15 px-2 py-0.5 text-[10px] text-[color:var(--accent-emerald)]">
+                              <Check className="h-3 w-3" />
+                              Done
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span className="font-mono rounded-full bg-[color:var(--surface-raised)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
+                          {pGroup.totalClips} {pGroup.totalClips === 1 ? 'clip' : 'clips'}
+                        </span>
+                      )}
                     </button>
+                    {progress && progress.clipTarget > 0 ? (
+                      <div className="h-0.5 bg-[color:var(--surface-muted)]">
+                        <div
+                          className={`h-full transition-[width] duration-300 ${
+                            progress.isComplete
+                              ? 'bg-[color:var(--accent-emerald)]'
+                              : 'bg-[color:var(--accent-blue)]'
+                          }`}
+                          style={{ width: `${paragraphPercent}%` }}
+                        />
+                      </div>
+                    ) : null}
 
                     {/* Nested sentences */}
                     {!isParagraphCollapsed ? (
@@ -348,6 +426,12 @@ export function AssemblyTray() {
                           const label = sGroup.sentence
                             ? `P${pNumber}-S${sNumber}`
                             : `P${pNumber}-?`
+
+                          const sentenceClipCount = sGroup.clips.length
+                          const sentenceComplete =
+                            sentenceClipCount >= MAX_CLIPS_PER_SENTENCE
+                          const sentencePercent =
+                            (sentenceClipCount / MAX_CLIPS_PER_SENTENCE) * 100
 
                           return (
                             <div key={sId}>
@@ -373,8 +457,27 @@ export function AssemblyTray() {
                                 <p className="line-clamp-1 flex-1 text-[12px] text-[color:var(--text-muted)]">
                                   {sGroup.sentence?.text ?? 'Unlinked clips'}
                                 </p>
-                                <span className="font-mono rounded-full bg-[color:var(--surface-raised)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
-                                  {sGroup.clips.length}
+                                <div className="hidden h-1 w-20 shrink-0 overflow-hidden rounded-full bg-[color:var(--surface-raised)] md:block">
+                                  <div
+                                    className={`h-full transition-[width] duration-300 ${
+                                      sentenceComplete
+                                        ? 'bg-[color:var(--accent-emerald)]'
+                                        : 'bg-[color:var(--accent-blue)]'
+                                    }`}
+                                    style={{ width: `${sentencePercent}%` }}
+                                  />
+                                </div>
+                                <span
+                                  className={`font-mono inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${
+                                    sentenceComplete
+                                      ? 'bg-[color:var(--accent-emerald)]/15 text-[color:var(--accent-emerald)]'
+                                      : 'bg-[color:var(--surface-raised)] text-[color:var(--text-muted)]'
+                                  }`}
+                                >
+                                  {sentenceComplete ? (
+                                    <Check className="h-2.5 w-2.5" />
+                                  ) : null}
+                                  {sentenceClipCount}/{MAX_CLIPS_PER_SENTENCE}
                                 </span>
                               </button>
 

@@ -12,6 +12,7 @@ import type {
 } from '@/types'
 import { accentBgMap } from '@/utils/accentColors'
 import { parseTranscript } from '@/utils/parseTranscript'
+import { MAX_CLIPS_PER_SENTENCE } from '@/utils/progress'
 
 /**
  * Per-sentence cache of keyword + search results, so revisiting a sentence
@@ -428,6 +429,14 @@ export const useWorkstationStore = create<WorkstationState>()(
         const { trayClips, activeSentenceId, paragraphs, candidateClips } = get()
 
         if (!activeSentenceId || trayClips.some(item => item.id === clip.id)) {
+          return
+        }
+
+        // Enforce 5-clip-per-sentence cap
+        const perSentenceCount = trayClips.filter(
+          c => c.sentenceId === activeSentenceId
+        ).length
+        if (perSentenceCount >= MAX_CLIPS_PER_SENTENCE) {
           return
         }
 

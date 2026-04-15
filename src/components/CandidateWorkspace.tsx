@@ -18,6 +18,10 @@ import {
   getAdjacentSentenceId,
   getSentencePosition,
 } from '@/utils/sentenceNavigation'
+import {
+  MAX_CLIPS_PER_SENTENCE,
+  countClipsForSentence,
+} from '@/utils/progress'
 
 const HOVER_PLAY_DELAY = 180
 
@@ -25,10 +29,12 @@ function ClipCard({
   clip,
   index,
   onAdd,
+  sentenceFull,
 }: {
   clip: CandidateClip
   index: number
   onAdd: (clip: CandidateClip) => void
+  sentenceFull: boolean
 }) {
   const [isHovered, setIsHovered] = useState(false)
   const [showVideo, setShowVideo] = useState(false)
@@ -56,11 +62,18 @@ function ClipCard({
   }, [isHovered, clip.videoUrl])
 
   const handleAdd = () => {
-    if (clip.added) return
+    if (clip.added || sentenceFull) return
     onAdd(clip)
     setJustAdded(true)
     window.setTimeout(() => setJustAdded(false), 620)
   }
+
+  const disabled = clip.added || sentenceFull
+  const buttonLabel = clip.added
+    ? '✓ Added to assembly'
+    : sentenceFull
+      ? 'Sentence full (5/5)'
+      : 'Add to assembly'
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -143,15 +156,17 @@ function ClipCard({
             event.stopPropagation()
             handleAdd()
           }}
-          disabled={clip.added}
+          disabled={disabled}
           className={clsx(
             'w-full rounded-[var(--radius-control)] border px-3 py-2 text-sm transition-colors',
             clip.added
               ? 'border-[color:var(--accent-blue)]/35 bg-[color:var(--accent-blue)]/15 text-[color:var(--accent-blue)]'
-              : 'border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)]'
+              : sentenceFull
+                ? 'cursor-not-allowed border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-dim)]'
+                : 'border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)]'
           )}
         >
-          {clip.added ? '✓ Added to assembly' : 'Add to assembly'}
+          {buttonLabel}
         </button>
       </div>
     </article>
@@ -170,6 +185,7 @@ export function CandidateWorkspace() {
   const isLoadingCandidates = useWorkstationStore(
     state => state.isLoadingCandidates
   )
+  const trayClips = useWorkstationStore(state => state.trayClips)
   const setActiveSentence = useWorkstationStore(state => state.setActiveSentence)
   const setActiveKeyword = useWorkstationStore(state => state.setActiveKeyword)
   const addCustomKeyword = useWorkstationStore(state => state.addCustomKeyword)
@@ -190,6 +206,14 @@ export function CandidateWorkspace() {
   const position = getSentencePosition(paragraphs, activeSentenceId)
   const prevId = getAdjacentSentenceId(paragraphs, activeSentenceId, -1)
   const nextId = getAdjacentSentenceId(paragraphs, activeSentenceId, 1)
+
+  const activeSentenceClipCount = activeSentenceId
+    ? countClipsForSentence(trayClips, activeSentenceId)
+    : 0
+  const activeSentenceFull =
+    activeSentenceClipCount >= MAX_CLIPS_PER_SENTENCE
+  const activeProgressPercent =
+    (activeSentenceClipCount / MAX_CLIPS_PER_SENTENCE) * 100
 
   const skeletonCards = Array.from({ length: 4 })
 
@@ -253,6 +277,18 @@ export function CandidateWorkspace() {
                   <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[color:var(--text-dim)]">
                     S{activeSentence.index + 1}
                   </span>
+                  <span
+                    className={clsx(
+                      'font-mono rounded-full px-2 py-0.5 text-[10px]',
+                      activeSentenceFull
+                        ? 'bg-[color:var(--accent-emerald)]/15 text-[color:var(--accent-emerald)]'
+                        : 'bg-[color:var(--surface-raised)] text-[color:var(--text-muted)]'
+                    )}
+                  >
+                    {activeSentenceFull
+                      ? `✓ ${activeSentenceClipCount}/${MAX_CLIPS_PER_SENTENCE}`
+                      : `${activeSentenceClipCount}/${MAX_CLIPS_PER_SENTENCE}`}
+                  </span>
                   {isSentenceLoading ? (
                     <span className="inline-flex items-center gap-1 text-[11px] text-[color:var(--accent-blue)]">
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -263,6 +299,17 @@ export function CandidateWorkspace() {
                 <p className="text-[15px] leading-7 text-[color:var(--text-primary)]">
                   {activeSentence.text}
                 </p>
+                <div className="mt-2 h-1 overflow-hidden rounded-full bg-[color:var(--surface-raised)]">
+                  <div
+                    className={clsx(
+                      'h-full transition-[width] duration-300',
+                      activeSentenceFull
+                        ? 'bg-[color:var(--accent-emerald)]'
+                        : 'bg-[color:var(--accent-blue)]'
+                    )}
+                    style={{ width: `${activeProgressPercent}%` }}
+                  />
+                </div>
               </div>
               <button
                 type="button"
@@ -396,7 +443,13 @@ export function CandidateWorkspace() {
         ) : candidateClips.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             {candidateClips.map((clip, index) => (
-              <ClipCard key={clip.id} clip={clip} index={index} onAdd={addToTray} />
+              <ClipCard
+                key={clip.id}
+                clip={clip}
+                index={index}
+                onAdd={addToTray}
+                sentenceFull={activeSentenceFull}
+              />
             ))}
           </div>
         ) : (
