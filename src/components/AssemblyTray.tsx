@@ -35,6 +35,8 @@ import {
   getParagraphProgress,
 } from '@/utils/progress'
 
+import { TrimModal } from './TrimModal'
+
 const CLIP_DRAG_MIME = 'application/x-footage-clip'
 
 type SentenceGroup = {
@@ -73,105 +75,15 @@ function getTotalDuration(clips: TrayClip[]): string {
   return `${minutes}:${seconds}`
 }
 
-function TrimEditor({
-  clip,
-  onClose,
-}: {
-  clip: TrayClip
-  onClose: () => void
-}) {
-  const setClipTrim = useWorkstationStore(state => state.setClipTrim)
-  const fullDuration = durationToSeconds(clip.duration)
-  const [start, setStart] = useState(clip.trimStart ?? 0)
-  const [end, setEnd] = useState(clip.trimEnd ?? fullDuration)
-
-  const clampedStart = Math.max(0, Math.min(start, fullDuration))
-  const clampedEnd = Math.max(clampedStart, Math.min(end, fullDuration))
-  const segmentLen = Math.max(0, clampedEnd - clampedStart)
-  const usingFull = clampedStart === 0 && clampedEnd === fullDuration
-
-  const save = () => {
-    setClipTrim(
-      clip.id,
-      clampedStart > 0 ? clampedStart : undefined,
-      clampedEnd < fullDuration ? clampedEnd : undefined
-    )
-    onClose()
-  }
-
-  const reset = () => {
-    setStart(0)
-    setEnd(fullDuration)
-    setClipTrim(clip.id, undefined, undefined)
-  }
-
-  return (
-    <div className="space-y-2 border-t border-[color:var(--border-subtle)] bg-[color:var(--surface-raised)]/80 px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <label className="flex flex-1 items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
-          IN
-          <input
-            type="number"
-            min={0}
-            max={fullDuration}
-            step="0.1"
-            value={start}
-            onChange={e => setStart(Number(e.target.value))}
-            className="font-mono w-full rounded border border-[color:var(--border-subtle)] bg-[color:var(--surface-canvas)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-primary)]"
-          />
-        </label>
-        <label className="flex flex-1 items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
-          OUT
-          <input
-            type="number"
-            min={0}
-            max={fullDuration}
-            step="0.1"
-            value={end}
-            onChange={e => setEnd(Number(e.target.value))}
-            className="font-mono w-full rounded border border-[color:var(--border-subtle)] bg-[color:var(--surface-canvas)] px-1.5 py-0.5 text-[11px] text-[color:var(--text-primary)]"
-          />
-        </label>
-      </div>
-      <p className="font-mono text-[10px] text-[color:var(--text-dim)]">
-        {segmentLen.toFixed(1)}s of {fullDuration}s
-        {usingFull ? ' (full clip)' : ''}
-      </p>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={save}
-          className="flex-1 rounded-[var(--radius-control)] border border-[color:var(--accent-blue)]/30 bg-[color:var(--accent-blue)]/15 px-2 py-1 text-[11px] text-[color:var(--accent-blue)]"
-        >
-          Save
-        </button>
-        <button
-          type="button"
-          onClick={reset}
-          className="rounded-[var(--radius-control)] border border-[color:var(--border-subtle)] px-2 py-1 text-[11px] text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
-        >
-          Reset
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-[var(--radius-control)] px-2 py-1 text-[11px] text-[color:var(--text-dim)] hover:text-[color:var(--text-primary)]"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  )
-}
-
 function SortableClipCard({
   clip,
   onRemove,
+  onTrim,
 }: {
   clip: TrayClip
   onRemove: (id: string) => void
+  onTrim: (id: string) => void
 }) {
-  const [trimOpen, setTrimOpen] = useState(false)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: clip.id })
 
@@ -194,9 +106,9 @@ function SortableClipCard({
       style={style}
       {...attributes}
       {...listeners}
-      className={`group relative overflow-hidden rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] ${
-        trimOpen ? '' : 'cursor-grab active:cursor-grabbing'
-      } ${isDragging ? 'ring-2 ring-[color:var(--accent-blue)]/40' : ''}`}
+      className={`group relative cursor-grab overflow-hidden rounded-[var(--radius-card)] border border-[color:var(--border-subtle)] bg-[color:var(--surface-muted)] active:cursor-grabbing ${
+        isDragging ? 'ring-2 ring-[color:var(--accent-blue)]/40' : ''
+      }`}
     >
       <div className="relative h-20">
         <img
@@ -214,7 +126,7 @@ function SortableClipCard({
             onPointerDown={e => e.stopPropagation()}
             onClick={e => {
               e.stopPropagation()
-              setTrimOpen(v => !v)
+              onTrim(clip.id)
             }}
             aria-label={hasTrim ? 'Edit trim' : 'Trim clip'}
             className={`flex h-5 w-5 items-center justify-center rounded-full ${
@@ -257,9 +169,6 @@ function SortableClipCard({
           )}
         </p>
       </div>
-      {trimOpen ? (
-        <TrimEditor clip={clip} onClose={() => setTrimOpen(false)} />
-      ) : null}
     </article>
   )
 }
@@ -325,6 +234,7 @@ export function AssemblyTray({ onOpenPlayer }: AssemblyTrayProps) {
   const [collapsedSentences, setCollapsedSentences] = useState<Set<string>>(
     new Set()
   )
+  const [trimmingClipId, setTrimmingClipId] = useState<string | null>(null)
 
   const trayClips = useWorkstationStore(state => state.trayClips)
   const paragraphs = useWorkstationStore(state => state.paragraphs)
@@ -783,6 +693,7 @@ export function AssemblyTray({ onOpenPlayer }: AssemblyTrayProps) {
                                             key={clip.id}
                                             clip={clip}
                                             onRemove={removeFromTray}
+                                            onTrim={setTrimmingClipId}
                                           />
                                         ))}
                                       </div>
@@ -839,6 +750,11 @@ export function AssemblyTray({ onOpenPlayer }: AssemblyTrayProps) {
           </button>
         </div>
       ) : null}
+
+      <TrimModal
+        clip={trayClips.find(c => c.id === trimmingClipId) ?? null}
+        onClose={() => setTrimmingClipId(null)}
+      />
     </section>
   )
 }
