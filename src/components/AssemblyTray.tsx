@@ -131,27 +131,44 @@ export function AssemblyTray() {
   }, [downloadState])
 
   const grouped = useMemo(() => {
+    // Build a sentence-order index so groups render in script order
+    // (S1 before S2 etc.), regardless of when the user added clips.
     const sentenceMap = new Map<string, ParsedSentence>()
+    const orderBySentenceId = new Map<string, number>()
+    let orderCursor = 0
     for (const paragraph of paragraphs) {
       for (const sentence of paragraph.sentences) {
         sentenceMap.set(sentence.id, sentence)
+        orderBySentenceId.set(sentence.id, orderCursor++)
       }
     }
-    const groups: { sentence: ParsedSentence | null; clips: TrayClip[] }[] = []
-    const indexByKey = new Map<string, number>()
+
+    const groupsBySentence = new Map<
+      string,
+      { sentence: ParsedSentence | null; clips: TrayClip[] }
+    >()
     for (const clip of trayClips) {
-      const existing = indexByKey.get(clip.sentenceId)
-      if (existing === undefined) {
-        indexByKey.set(clip.sentenceId, groups.length)
-        groups.push({
+      const existing = groupsBySentence.get(clip.sentenceId)
+      if (existing) {
+        existing.clips.push(clip)
+      } else {
+        groupsBySentence.set(clip.sentenceId, {
           sentence: sentenceMap.get(clip.sentenceId) ?? null,
           clips: [clip],
         })
-      } else {
-        groups[existing].clips.push(clip)
       }
     }
-    return groups
+
+    // Sentences not in the script (orphans) sort to the end, preserving
+    // insertion order relative to each other.
+    const ORPHAN = Number.MAX_SAFE_INTEGER
+    return Array.from(groupsBySentence.entries())
+      .sort(([a], [b]) => {
+        const ai = orderBySentenceId.get(a) ?? ORPHAN
+        const bi = orderBySentenceId.get(b) ?? ORPHAN
+        return ai - bi
+      })
+      .map(([, group]) => group)
   }, [trayClips, paragraphs])
 
   async function handleDownloadAll() {
